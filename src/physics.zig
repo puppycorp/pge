@@ -3,7 +3,6 @@ const std = @import("std");
 fn expectApproxEq(comptime T: type, got: T, expected: T, tol: T) !void {
     try std.testing.expect(@abs(got - expected) <= tol);
 }
-
 const Vec3 = struct {
     x: f32,
     y: f32,
@@ -127,6 +126,11 @@ pub const Joint = struct {
     }
 };
 
+pub const CollisionShape = union(enum) {
+    Plane: struct { width: f32, height: f32 },
+    Sphere: struct { radius: f32 },
+    Box: struct { width: f32, height: f32, depth: f32 },
+};
 pub const RigidBody = struct {
     position: Vec3,
     velocity: Vec3,
@@ -135,14 +139,67 @@ pub const RigidBody = struct {
     rot: Quaternion,
     avel: Vec3,
     inertia: f32,
+    shape: CollisionShape,
     pub fn integrate(self: *RigidBody, dt: f32) void {
         self.position = self.position.add(self.velocity.scale(dt));
     }
 };
-
+pub const Coord = struct {
+    x: i32,
+    y: i32,
+    z: i32,
+};
+pub const SpatialGrid = struct {
+    cellSize: f32,
+    allocator: *std.mem.Allocator,
+    grid: std.AutoHashMap(usize, std.ArrayList(*RigidBody)),
+    pub fn init(allocator: *std.mem.Allocator, cellSize: f32) !SpatialGrid {
+        return SpatialGrid{
+            .cellSize = cellSize,
+            .allocator = allocator,
+            .grid = try std.AutoHashMap(usize, std.ArrayList(*RigidBody)).init(allocator),
+        };
+    }
+    pub fn clear(self: *SpatialGrid) void {
+        self.grid.clear();
+    }
+    pub fn hashCoords(x: i32, y: i32, z: i32) usize {
+        return (@as(usize, x) * 73856093) ^ (@as(usize, y) * 19349663) ^ (@as(usize, z) * 83492791);
+    }
+    pub fn cellCoords(self: *SpatialGrid, pos: Vec3) Coord {
+        return Coord{
+            .x = @intCast(pos.x / self.cellSize),
+            .y = @intCast(pos.y / self.cellSize),
+            .z = @intCast(pos.z / self.cellSize),
+        };
+    }
+    pub fn insert(self: *SpatialGrid, body: *RigidBody) !void {
+        const coords = self.cellCoords(body.position);
+        const key = self.hashCoords(coords.x, coords.y, coords.z);
+        if (self.grid.get(key)) |list| {
+            try list.append(body);
+        } else {
+            var list = try std.ArrayList(*RigidBody).init(self.allocator);
+            try list.append(body);
+            try self.grid.put(key, list);
+        }
+    }
+    pub fn queryCell(self: *SpatialGrid, cx: i32, cy: i32, cz: i32) ?[]*RigidBody {
+        const key = self.hashCoords(cx, cy, cz);
+        if (self.grid.get(key)) |list| return list.items;
+        return null;
+    }
+    pub fn forEachCell(self: *SpatialGrid, f: fn (key: usize, bodies: []*RigidBody) void) void {
+        var iter = self.grid.iterator();
+        while (iter.next()) |entry| {
+            f(entry.key, entry.value.items);
+        }
+    }
+};
 pub const Scene = struct {
     bodies: []RigidBody,
     gravity: Vec3,
+    grid: SpatialGrid,
     pub fn update(self: *Scene, dt: f32) void {
         for (self.bodies) |*body| {
             body.velocity = body.velocity.add(self.gravity.scale(dt));
@@ -150,8 +207,8 @@ pub const Scene = struct {
             body.rot = body.rot.integrate(body.avel, dt);
         }
     }
+    pub fn detectCollisions() void {}
 };
-
 test "Vec3 operations" {
     var v1 = Vec3{ .x = 1.0, .y = 2.0, .z = 3.0 };
     var v2 = Vec3{ .x = 4.0, .y = 5.0, .z = 6.0 };
@@ -209,6 +266,7 @@ test "RigidBody integration" {
         .rot = Quaternion.identity(),
         .avel = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
         .inertia = 1.0,
+        .shape = CollisionShape{ .Sphere = .{ .radius = 1.0 } },
     };
     const dt = 1.0;
     body.integrate(dt);
@@ -227,6 +285,7 @@ test "Joint.solve" {
         .rot = Quaternion.identity(),
         .avel = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
         .inertia = 1.0,
+        .shape = CollisionShape{ .Sphere = .{ .radius = 1.0 } },
     };
 
     var bodyB = RigidBody{
@@ -237,6 +296,7 @@ test "Joint.solve" {
         .rot = Quaternion.identity(),
         .avel = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
         .inertia = 1.0,
+        .shape = CollisionShape{ .Sphere = .{ .radius = 1.0 } },
     };
 
     // Setup joint with anchors at zero offset and desired distance 1.0.
@@ -278,6 +338,7 @@ test "Scene.update integrates bodies with gravity and angular velocity" {
         .rot = Quaternion.identity(),
         .avel = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 },
         .inertia = 1.0,
+        .shape = CollisionShape{ .Sphere = .{ .radius = 1.0 } },
     }};
 
     var scene = Scene{
