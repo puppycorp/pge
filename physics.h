@@ -26,22 +26,10 @@ static inline Vec3 Vec3_normalized(Vec3 v) {
 typedef struct {
     float w, x, y, z;
 } Quaternion;
-static inline Quaternion Quaternion_identity(void) {
-    Quaternion q = { 1.0f, 0.0f, 0.0f, 0.0f };
-    return q;
-}
-static inline Quaternion Quaternion_scale(Quaternion q, float s) {
-    Quaternion r = { q.w * s, q.x * s, q.y * s, q.z * s };
-    return r;
-}
-static inline float Quaternion_mag(Quaternion q) {
-    return sqrtf(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
-}
-static inline Quaternion Quaternion_normalized(Quaternion q) {
-    float m = Quaternion_mag(q);
-    Quaternion r = { q.w / m, q.x / m, q.y / m, q.z / m };
-    return r;
-}
+static inline Quaternion Quaternion_identity(void) { return (Quaternion){ 1.0f, 0.0f, 0.0f, 0.0f }; }
+static inline Quaternion Quaternion_scale(Quaternion q, float s) { return (Quaternion){ q.w * s, q.x * s, q.y * s, q.z * s }; }
+static inline float Quaternion_mag(Quaternion q) { return sqrtf(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z); }
+static inline Quaternion Quaternion_normalized(Quaternion q) { float m = Quaternion_mag(q); return (Quaternion){ q.w / m, q.x / m, q.y / m, q.z / m }; }
 static inline Quaternion Quaternion_mul(Quaternion a, Quaternion b) {
     Quaternion r = {
         a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
