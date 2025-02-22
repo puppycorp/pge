@@ -30,7 +30,7 @@ const Vec3 = struct {
             .z = self.z * scalar,
         };
     }
-    pub fn dot(self: Vec3, other: Vec3) f64 {
+    pub fn dot(self: Vec3, other: Vec3) f32 {
         return self.x * other.x + self.y * other.y + self.z * other.z;
     }
     pub fn cross(self: Vec3, other: Vec3) Vec3 {
@@ -40,7 +40,7 @@ const Vec3 = struct {
             .z = self.x * other.y - self.y * other.x,
         };
     }
-    pub fn length(self: Vec3) f64 {
+    pub fn length(self: Vec3) f32 {
         return std.math.sqrt(self.dot(self));
     }
 
@@ -50,16 +50,17 @@ const Vec3 = struct {
         return self.scale(1.0 / len);
     }
 };
+
 pub const Quaternion = struct {
-    w: f64,
-    x: f64,
-    y: f64,
-    z: f64,
+    w: f32,
+    x: f32,
+    y: f32,
+    z: f32,
     pub fn identity() Quaternion {
         return Quaternion{ .w = 1.0, .x = 0.0, .y = 0.0, .z = 0.0 };
     }
     /// Scales the quaternion by a scalar.
-    pub fn scale(self: Quaternion, scalar: f64) Quaternion {
+    pub fn scale(self: Quaternion, scalar: f32) Quaternion {
         return Quaternion{
             .w = self.w * scalar,
             .x = self.x * scalar,
@@ -89,7 +90,7 @@ pub const Quaternion = struct {
     }
     /// Integrates the quaternion over time using the angular velocity.
     /// This uses the formula: q_new = q + dt * 0.5 * omega_quat * q
-    pub fn integrate(self: Quaternion, angularVelocity: Vec3, dt: f64) Quaternion {
+    pub fn integrate(self: Quaternion, angularVelocity: Vec3, dt: f32) Quaternion {
         const omega = Quaternion{
             .w = 0.0,
             .x = angularVelocity.x,
@@ -105,12 +106,13 @@ pub const Quaternion = struct {
         }).normalized();
     }
 };
+
 pub const Joint = struct {
     bodyA: *RigidBody,
     bodyB: *RigidBody,
     anchorA: Vec3,
     anchorB: Vec3,
-    distance: f64,
+    distance: f32,
     pub fn solve(self: *Joint) void {
         const rA = self.anchorA;
         const rB = self.anchorB;
@@ -124,21 +126,30 @@ pub const Joint = struct {
         self.bodyB.velocity = self.bodyB.velocity.add(j.scale(1.0 / self.bodyB.mass));
     }
 };
+
 pub const RigidBody = struct {
     position: Vec3,
     velocity: Vec3,
-    mass: f64,
-    restitution: f64,
+    mass: f32,
+    restitution: f32,
     rot: Quaternion,
     avel: Vec3,
-    inertia: f64,
-    pub fn integrate(self: *RigidBody, dt: f64) void {
+    inertia: f32,
+    pub fn integrate(self: *RigidBody, dt: f32) void {
         self.position = self.position.add(self.velocity.scale(dt));
     }
 };
+
 pub const Scene = struct {
     bodies: []RigidBody,
     gravity: Vec3,
+    pub fn update(self: *Scene, dt: f32) void {
+        for (self.bodies) |*body| {
+            body.velocity = body.velocity.add(self.gravity.scale(dt));
+            body.integrate(dt);
+            body.rot = body.rot.integrate(body.avel, dt);
+        }
+    }
 };
 
 test "Vec3 operations" {
@@ -165,7 +176,7 @@ test "Vec3 operations" {
 
     // Test dot
     const dot = v1.dot(v2);
-    try expectApproxEq(f64, dot, 32.0, 0.001);
+    try expectApproxEq(f32, dot, 32.0, 0.001);
 
     // Test cross
     const vcross = v1.cross(v2);
@@ -176,7 +187,7 @@ test "Vec3 operations" {
     // Test length and normalized (non-zero)
     //const len = v1.length();
     const norm = v1.normalized();
-    try expectApproxEq(f64, norm.length(), 1.0, 0.001);
+    try expectApproxEq(f32, norm.length(), 1.0, 0.001);
 }
 
 test "Quaternion integration" {
@@ -257,4 +268,39 @@ test "Joint.solve" {
     try expectApproxEq(f32, bodyB.velocity.x, -0.5, 0.001);
     try expectApproxEq(f32, bodyB.velocity.y, 0.0, 0.001);
     try expectApproxEq(f32, bodyB.velocity.z, 0.0, 0.001);
+}
+test "Scene.update integrates bodies with gravity and angular velocity" {
+    var bodies: [1]RigidBody = .{RigidBody{
+        .position = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
+        .velocity = Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 },
+        .mass = 1.0,
+        .restitution = 0.5,
+        .rot = Quaternion.identity(),
+        .avel = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 },
+        .inertia = 1.0,
+    }};
+
+    var scene = Scene{
+        .bodies = bodies[0..],
+        .gravity = Vec3{ .x = 0.0, .y = -9.81, .z = 0.0 },
+    };
+
+    const dt = 1.0;
+    scene.update(dt);
+
+    // Expected new velocity: (1.0, -9.81, 0.0)
+    try expectApproxEq(f32, bodies[0].velocity.x, 1.0, 0.001);
+    try expectApproxEq(f32, bodies[0].velocity.y, -9.81, 0.001);
+    try expectApproxEq(f32, bodies[0].velocity.z, 0.0, 0.001);
+
+    // Expected new position: (1.0, -9.81, 0.0)
+    try expectApproxEq(f32, bodies[0].position.x, 1.0, 0.001);
+    try expectApproxEq(f32, bodies[0].position.y, -9.81, 0.001);
+    try expectApproxEq(f32, bodies[0].position.z, 0.0, 0.001);
+
+    // Check that the rotation has been updated.
+    try std.testing.expect(bodies[0].rot.w != 1.0 or
+        bodies[0].rot.x != 0.0 or
+        bodies[0].rot.y != 0.0 or
+        bodies[0].rot.z != 0.0);
 }
