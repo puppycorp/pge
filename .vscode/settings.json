@@ -1,4 +1,0 @@
-{
-	"rust-analyzer.imports.granularity.group": "item",
-	"rust-analyzer.cargo.features": ["wgpu_winit"]
-}

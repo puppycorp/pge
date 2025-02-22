@@ -2,3 +2,6 @@
 workdir
 .DS_Store
 *.bkp
+.zig-cache
+zig-out
+node_modules
