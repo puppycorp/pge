@@ -6,7 +6,7 @@ option(TEST "Build tests" OFF)
 
 if(TEST)
     message(STATUS "Building tests")
-    list(APPEND SOURCES src/graphics_test.c)
+    list(APPEND SOURCES src/interface_test.c)
     list(APPEND SOURCES src/physics_tests.c)
     list(APPEND SOURCES src/test_main.c)
     add_executable(pge_test ${SOURCES})
