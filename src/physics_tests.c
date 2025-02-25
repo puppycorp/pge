@@ -2,34 +2,34 @@
 #include "test.h"
 
 TEST(vec3_operations){
-    Vec3 v1 = { 1.0f, 2.0f, 3.0f }, v2 = { 4.0f, 5.0f, 6.0f };
-    Vec3 vadd = Vec3_add(v1, v2);
+    PGEVec3 v1 = { 1.0f, 2.0f, 3.0f }, v2 = { 4.0f, 5.0f, 6.0f };
+    PGEVec3 vadd = Vec3_add(v1, v2);
     EXPECT_APPROX_EQ(vadd.x, 5.0f, 0.001f);
     EXPECT_APPROX_EQ(vadd.y, 7.0f, 0.001f);
     EXPECT_APPROX_EQ(vadd.z, 9.0f, 0.001f);
-    Vec3 vsub = Vec3_sub(v2, v1);
+    PGEVec3 vsub = Vec3_sub(v2, v1);
     EXPECT_APPROX_EQ(vsub.x, 3.0f, 0.001f);
     EXPECT_APPROX_EQ(vsub.y, 3.0f, 0.001f);
     EXPECT_APPROX_EQ(vsub.z, 3.0f, 0.001f);
-    Vec3 vscale = Vec3_scale(v1, 2.0f);
+    PGEVec3 vscale = Vec3_scale(v1, 2.0f);
     EXPECT_APPROX_EQ(vscale.x, 2.0f, 0.001f);
     EXPECT_APPROX_EQ(vscale.y, 4.0f, 0.001f);
     EXPECT_APPROX_EQ(vscale.z, 6.0f, 0.001f);
     float dot = Vec3_dot(v1, v2);
     EXPECT_APPROX_EQ(dot, 32.0f, 0.001f);
-    Vec3 vcross = Vec3_cross(v1, v2);
+    PGEVec3 vcross = Vec3_cross(v1, v2);
     EXPECT_APPROX_EQ(vcross.x, -3.0f, 0.001f);
     EXPECT_APPROX_EQ(vcross.y, 6.0f, 0.001f);
     EXPECT_APPROX_EQ(vcross.z, -3.0f, 0.001f);
-    Vec3 norm = Vec3_normalized(v1);
+    PGEVec3 norm = Vec3_normalized(v1);
     EXPECT_APPROX_EQ(Vec3_length(norm), 1.0f, 0.001f);
 }
 
 TEST(quaternion_integration){
-    Quaternion q = Quaternion_identity();
-    Vec3 av = { 0.0f, 1.0f, 0.0f };
+    PGEQuat q = Quaternion_identity();
+    PGEVec3 av = { 0.0f, 1.0f, 0.0f };
     float dt = 0.016f;
-    Quaternion qNew = pge_quat_integrate(q, av, dt);
+    PGEQuat qNew = pge_quat_integrate(q, av, dt);
     assert(qNew.w != q.w || qNew.x != q.x || qNew.y != q.y || qNew.z != q.z);
 }
 

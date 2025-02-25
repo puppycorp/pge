@@ -6,25 +6,25 @@
 #include <math.h>
 #include <assert.h>
 
-typedef struct { float x, y, z; } Vec3;
-static inline Vec3 Vec3_add(Vec3 a, Vec3 b) { return (Vec3){ a.x + b.x, a.y + b.y, a.z + b.z }; }
-static inline Vec3 Vec3_sub(Vec3 a, Vec3 b) { return (Vec3){ a.x - b.x, a.y - b.y, a.z - b.z }; }
-static inline Vec3 Vec3_scale(Vec3 v, float s) { return (Vec3){ v.x * s, v.y * s, v.z * s }; }
-static inline float Vec3_dot(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-static inline Vec3 Vec3_cross(Vec3 a, Vec3 b) { return (Vec3){ a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; }
-static inline float Vec3_length(Vec3 v) { return sqrtf(Vec3_dot(v, v)); }
-static inline Vec3 Vec3_normalized(Vec3 v) {
+typedef struct { float x, y, z; } PGEVec3;
+static inline PGEVec3 Vec3_add(PGEVec3 a, PGEVec3 b) { return (PGEVec3){ a.x + b.x, a.y + b.y, a.z + b.z }; }
+static inline PGEVec3 Vec3_sub(PGEVec3 a, PGEVec3 b) { return (PGEVec3){ a.x - b.x, a.y - b.y, a.z - b.z }; }
+static inline PGEVec3 Vec3_scale(PGEVec3 v, float s) { return (PGEVec3){ v.x * s, v.y * s, v.z * s }; }
+static inline float Vec3_dot(PGEVec3 a, PGEVec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+static inline PGEVec3 Vec3_cross(PGEVec3 a, PGEVec3 b) { return (PGEVec3){ a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; }
+static inline float Vec3_length(PGEVec3 v) { return sqrtf(Vec3_dot(v, v)); }
+static inline PGEVec3 Vec3_normalized(PGEVec3 v) {
     float len = Vec3_length(v);
     if (len == 0) return v;
     return Vec3_scale(v, 1.0f / len);
 }
-typedef struct { float w, x, y, z; } Quaternion;
-static inline Quaternion Quaternion_identity(void) { return (Quaternion){ 1.0f, 0.0f, 0.0f, 0.0f }; }
-static inline Quaternion Quaternion_scale(Quaternion q, float s) { return (Quaternion){ q.w * s, q.x * s, q.y * s, q.z * s }; }
-static inline float Quaternion_mag(Quaternion q) { return sqrtf(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z); }
-static inline Quaternion Quaternion_normalized(Quaternion q) { float m = Quaternion_mag(q); return (Quaternion){ q.w / m, q.x / m, q.y / m, q.z / m }; }
-static inline Quaternion Quaternion_mul(Quaternion a, Quaternion b) {
-    Quaternion r = {
+typedef struct { float w, x, y, z; } PGEQuat;
+static inline PGEQuat Quaternion_identity(void) { return (PGEQuat){ 1.0f, 0.0f, 0.0f, 0.0f }; }
+static inline PGEQuat Quaternion_scale(PGEQuat q, float s) { return (PGEQuat){ q.w * s, q.x * s, q.y * s, q.z * s }; }
+static inline float Quaternion_mag(PGEQuat q) { return sqrtf(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z); }
+static inline PGEQuat Quaternion_normalized(PGEQuat q) { float m = Quaternion_mag(q); return (PGEQuat){ q.w / m, q.x / m, q.y / m, q.z / m }; }
+static inline PGEQuat Quaternion_mul(PGEQuat a, PGEQuat b) {
+    PGEQuat r = {
         a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
         a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
         a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
@@ -32,10 +32,10 @@ static inline Quaternion Quaternion_mul(Quaternion a, Quaternion b) {
     };
     return r;
 }
-static inline Quaternion pge_quat_integrate(Quaternion q, Vec3 av, float dt) {
-    Quaternion omega = { 0.0f, av.x, av.y, av.z };
-    Quaternion qdot = Quaternion_scale(Quaternion_mul(omega, q), 0.5f);
-    Quaternion r = { q.w + qdot.w * dt, q.x + qdot.x * dt, q.y + qdot.y * dt, q.z + qdot.z * dt };
+static inline PGEQuat pge_quat_integrate(PGEQuat q, PGEVec3 av, float dt) {
+    PGEQuat omega = { 0.0f, av.x, av.y, av.z };
+    PGEQuat qdot = Quaternion_scale(Quaternion_mul(omega, q), 0.5f);
+    PGEQuat r = { q.w + qdot.w * dt, q.x + qdot.x * dt, q.y + qdot.y * dt, q.z + qdot.z * dt };
     return Quaternion_normalized(r);
 }
 typedef struct {
@@ -47,12 +47,12 @@ typedef struct {
     };
 } CollisionShape;
 struct RigidBody {
-    Vec3 position;
-    Vec3 velocity;
+    PGEVec3 position;
+    PGEVec3 velocity;
     float mass;
     float restitution;
-    Quaternion rot;
-    Vec3 avel;
+    PGEQuat rot;
+    PGEVec3 avel;
     float inertia;
     CollisionShape shape;
 };
@@ -104,40 +104,40 @@ void pge_grid_insert(Grid *grid, RigidBody *body){
 typedef struct {
     RigidBody *bodyA;
     RigidBody *bodyB;
-    Vec3 anchorA;
-    Vec3 anchorB;
+    PGEVec3 anchorA;
+    PGEVec3 anchorB;
     float distance;
 } Joint;
 void Joint_solve(Joint *joint) {
-    Vec3 rA = joint->anchorA, rB = joint->anchorB;
-    Vec3 pA = Vec3_add(joint->bodyA->position, rA);
-    Vec3 pB = Vec3_add(joint->bodyB->position, rB);
-    Vec3 diff = Vec3_sub(pB, pA);
+    PGEVec3 rA = joint->anchorA, rB = joint->anchorB;
+    PGEVec3 pA = Vec3_add(joint->bodyA->position, rA);
+    PGEVec3 pB = Vec3_add(joint->bodyB->position, rB);
+    PGEVec3 diff = Vec3_sub(pB, pA);
     float len = Vec3_length(diff);
-    Vec3 n = (len == 0 ? diff : Vec3_scale(diff, 1.0f / len));
+    PGEVec3 n = (len == 0 ? diff : Vec3_scale(diff, 1.0f / len));
     float c = len - joint->distance;
     float invMass = 1.0f / joint->bodyA->mass + 1.0f / joint->bodyB->mass;
-    Vec3 impulse = Vec3_scale(n, -c / invMass);
+    PGEVec3 impulse = Vec3_scale(n, -c / invMass);
     joint->bodyA->velocity = Vec3_sub(joint->bodyA->velocity, Vec3_scale(impulse, 1.0f / joint->bodyA->mass));
     joint->bodyB->velocity = Vec3_add(joint->bodyB->velocity, Vec3_scale(impulse, 1.0f / joint->bodyB->mass));
 }
 void RigidBody_integrate(RigidBody *body, float dt) { body->position = Vec3_add(body->position, Vec3_scale(body->velocity, dt)); }
-void resolveJoint(Joint *joint, Vec3 rA, Vec3 rB) {
-    Vec3 pA = Vec3_add(joint->bodyA->position, rA);
-    Vec3 pB = Vec3_add(joint->bodyB->position, rB);
-    Vec3 diff = Vec3_sub(pB, pA);
+void resolveJoint(Joint *joint, PGEVec3 rA, PGEVec3 rB) {
+    PGEVec3 pA = Vec3_add(joint->bodyA->position, rA);
+    PGEVec3 pB = Vec3_add(joint->bodyB->position, rB);
+    PGEVec3 diff = Vec3_sub(pB, pA);
     float len = Vec3_length(diff);
-    Vec3 n = (len == 0 ? diff : Vec3_scale(diff, 1.0f / len));
+    PGEVec3 n = (len == 0 ? diff : Vec3_scale(diff, 1.0f / len));
     float c = len - joint->distance;
     float invMass = 1.0f / joint->bodyA->mass + 1.0f / joint->bodyB->mass;
-    Vec3 impulse = Vec3_scale(n, -c / invMass);
+    PGEVec3 impulse = Vec3_scale(n, -c / invMass);
     joint->bodyA->velocity = Vec3_sub(joint->bodyA->velocity, Vec3_scale(impulse, 1.0f / joint->bodyA->mass));
     joint->bodyB->velocity = Vec3_add(joint->bodyB->velocity, Vec3_scale(impulse, 1.0f / joint->bodyB->mass));
 }
 typedef struct {
     RigidBody *bodies;
     size_t bodyCount;
-    Vec3 gravity;
+    PGEVec3 gravity;
     Grid grid;
 } Scene;
 void scene_update(Scene *scene, float dt) {
@@ -156,13 +156,13 @@ void scene_detect_collisions(Scene *scene) {
                 RigidBody *bodyA = cell->bodies[i];
                 RigidBody *bodyB = cell->bodies[j];
                 if (bodyA->mass == 0 && bodyB->mass == 0) continue;
-                Vec3 diff = Vec3_sub(bodyB->position, bodyA->position);
+                PGEVec3 diff = Vec3_sub(bodyB->position, bodyA->position);
                 float len = Vec3_length(diff);
                 if (len == 0) continue;
-                Vec3 n = Vec3_scale(diff, 1.0f / len);
+                PGEVec3 n = Vec3_scale(diff, 1.0f / len);
                 float c = len - 1.0f;
                 float invMass = 1.0f / bodyA->mass + 1.0f / bodyB->mass;
-                Vec3 impulse = Vec3_scale(n, -c / invMass);
+                PGEVec3 impulse = Vec3_scale(n, -c / invMass);
                 bodyA->velocity = Vec3_sub(bodyA->velocity, Vec3_scale(impulse, 1.0f / bodyA->mass));
                 bodyB->velocity = Vec3_add(bodyB->velocity, Vec3_scale(impulse, 1.0f / bodyB->mass));
             }
