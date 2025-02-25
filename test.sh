@@ -1,5 +1,5 @@
 #!/bin/bash
 mkdir -p build
-cmake -Bbuild -H. -DMODE="test"
+cmake -Bbuild -H. -DTEST=ON
 cmake --build build
 ./build/pge_test "$@"
