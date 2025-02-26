@@ -2,3 +2,5 @@
 workdir
 .DS_Store
 *.bkp
+CMakeCache.txt
+build

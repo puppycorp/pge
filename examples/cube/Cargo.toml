@@ -1,9 +1,0 @@
-[package]
-name = "cube"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-pge = { path = "../../", features = ["wgpu_winit"] }
-log = "0.4"
-rand = "0.8"
