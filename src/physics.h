@@ -7,6 +7,7 @@
 #include <assert.h>
 
 typedef struct { float x, y, z; } PGEVec3;
+PGEVec3 pge_vec3_new(float x, float y, float z) { return (PGEVec3){ x, y, z }; }
 static inline PGEVec3 Vec3_add(PGEVec3 a, PGEVec3 b) { return (PGEVec3){ a.x + b.x, a.y + b.y, a.z + b.z }; }
 static inline PGEVec3 Vec3_sub(PGEVec3 a, PGEVec3 b) { return (PGEVec3){ a.x - b.x, a.y - b.y, a.z - b.z }; }
 static inline PGEVec3 Vec3_scale(PGEVec3 v, float s) { return (PGEVec3){ v.x * s, v.y * s, v.z * s }; }

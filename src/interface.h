@@ -1,6 +1,10 @@
 #ifndef INTERFACE_H
 #define INTERFACE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct PGEBuffer      PGEBuffer;
 typedef struct PGETexture     PGETexture;
 typedef struct PGEPipeline    PGEPipeline;
@@ -110,5 +114,9 @@ void          pge_destroy_sound(PGESound* sound);
 void          pge_play_sound(PGESound* sound, float volume);
 void          pge_stop_sound(PGESound* sound);
 void          pge_set_sound_loop(PGESound* sound, int loop);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // INTERFACE_H

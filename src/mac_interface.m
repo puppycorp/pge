@@ -1,4 +1,4 @@
-#import "Graphics.h"
+#import "interface.h"
 #import <Foundation/Foundation.h>
 
 #pragma mark - PGEBuffer
@@ -78,4 +78,8 @@ void pge_write_buffer(Buffer* buffer, void* data, int size) {
     // Write up to the minimum of 'size' and the buffer's capacity.
     int copySize = MIN(size, pgeBuffer.size);
     [pgeBuffer.data replaceBytesInRange:NSMakeRange(0, copySize) withBytes:data];
+}
+
+int pge_poll_event(PGEInputEvent* event) {
+	return 0;
 }
