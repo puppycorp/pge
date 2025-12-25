@@ -6,7 +6,7 @@ mod buffer;
 mod internal_types;
 mod tests;
 mod compositor;
-mod physics;
+pub mod physics;
 mod spatial_grid;
 //mod engine_state;
 mod debug;

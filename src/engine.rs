@@ -11,17 +11,13 @@ use crate::hardware::RenderEncoder;
 use crate::hardware::TextureHandle;
 use crate::hardware::WindowHandle;
 use crate::internal_types::*;
-use crate::physics::PhysicsSystem;
-use crate::spatial_grid::SpatialGrid;
 use crate::state::State;
 use crate::types::*;
 use crate::utility::topo_sort_nodes;
-use crate::Arena;
 use crate::ArenaId;
 use crate::GUIElement;
 use crate::Window;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::ops::Range;
 use std::time::Duration;
 use std::time::Instant;
@@ -76,12 +72,6 @@ impl GuiBuffers {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SceneCollection {
-	grid: SpatialGrid,
-	physics_system: PhysicsSystem,
-}
-
 struct WindowContext {
 	window_id: ArenaId<Window>,
 	window: WindowHandle,
@@ -96,7 +86,6 @@ struct NodeComputedMetadata {
 pub struct Engine<A, H> {
     pub app: A,
     pub state: State,
-	grids: HashMap<ArenaId<Scene>, SpatialGrid>,
     hardware: H,
     vertices_buffer: Buffer,
     tex_coords_buffer: Buffer,
@@ -118,7 +107,6 @@ pub struct Engine<A, H> {
 	//nodes: HashMap<ArenaId<Node>, NodeComputedMetadata>,
 	mesh_nodes: HashMap<ArenaId<Mesh>, Vec<ArenaId<Node>>>,
 	topo_sorted_nodes: Vec<ArenaId<Node>>,
-	scene_collections: HashMap<ArenaId<Scene>, SceneCollection>,
 	fps: u32
 }
 
@@ -151,7 +139,6 @@ where
         Self {
             app,
             state,
-			grids: HashMap::new(),
             hardware,
             vertices_buffer,
             tex_coords_buffer,
@@ -174,7 +161,6 @@ where
 			mesh_nodes: HashMap::new(),
 			fps: 0,
 			topo_sorted_nodes: Vec::new(),
-			scene_collections: HashMap::new(),
         }
     }
 
@@ -217,18 +203,6 @@ where
 			};
 
 			let node = self.state.nodes.get_mut(node_id).unwrap();
-			if let Some(scene_id) = scene_id {
-				if let Some(collision_shape) = &node.collision_shape {
-					if node.global_transform != transform {
-						let aabb = collision_shape.aabb(node.translation);
-						let collection = self.scene_collections.entry(scene_id).or_insert(SceneCollection {
-							grid: SpatialGrid::new(5.0),
-							physics_system: PhysicsSystem::new(),
-						});
-						collection.grid.set_node(*node_id, aabb);
-					}
-				}
-			}
 			node.global_transform = transform;
 			node.scene_id = scene_id;
 
@@ -240,9 +214,6 @@ where
 			}
 		}
 
-		for (_, c) in &mut self.scene_collections {
-			c.grid.retain_nodes(|node_id| self.state.nodes.contains(node_id));
-		}
 		let elapsed = timer.elapsed();
 		if elapsed > Duration::from_millis(5) {
 			log::info!("Node processing took {:?}", elapsed);
@@ -594,66 +565,6 @@ where
         }*/
     }
 
-	fn process_scenes(&mut self) {
-		for (scene_id, scene) in &self.state.scenes {
-			self.grids.entry(scene_id).or_insert_with(|| SpatialGrid::new(5.0));
-		}
-	}
-
-	fn process_physics(&mut self, dt: f32) {
-		// for (scene_id, scene) in &self.state.scenes {
-		// 	self.scene_collections.entry(scene_id).or_insert(SceneCollection {
-		// 		moved_nodes: Vec::new(),
-		// 		grid: SpatialGrid::new(5.0),
-		// 		physics_system: PhysicsSystem::new(),
-		// 	});
-		// }
-
-		for (_, c) in &mut self.scene_collections {
-			let timings = c
-				.physics_system
-				.physics_update(&mut self.state, &mut c.grid, dt);
-
-			for (_, ray_cast) in &mut self.state.raycasts {
-				ray_cast.intersects.clear();
-
-				let node = match self.state.nodes.get(&ray_cast.node_id) {
-					Some(node) => node,
-					None => continue,
-				};
-
-				let start = node.translation;
-				let end = start + node.rotation * glam::Vec3::new(0.0, 0.0, 1.0) * ray_cast.len;
-				let nodes = c.grid.get_line_ray_nodes(start, end);
-
-				let mut intersections = Vec::new();
-
-				for node_inx in nodes {
-					if node_inx == ray_cast.node_id {
-						continue;
-					}
-
-					let aabb = match c.grid.get_node_rect(node_inx) {
-						Some(aabb) => aabb,
-						None => continue,
-					};
-
-					if let Some((tmin, _tmax)) = aabb.intersect_ray(start, end) {
-						intersections.push((tmin, node_inx));
-					}
-				}
-
-				// Sort the intersections by tmin
-				intersections.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-
-				// Store the sorted node indices
-				ray_cast.intersects = intersections
-					.into_iter()
-					.map(|(_, node_inx)| node_inx)
-					.collect();
-			}
-		}
-	}
 
     pub fn on_mouse_input(&mut self, window: WindowHandle, event: MouseEvent) {
 		let window_ctx = match self.windows.iter().find(|w| w.window == window) {
@@ -686,8 +597,6 @@ where
 		self.process_point_lights();
 		self.process_ui();
 		self.update_windows();
-		self.process_scenes();
-		self.process_physics(dt);
 		self.app.on_process(&mut self.state, dt);
         for (window_id, _) in &self.state.windows {
 			let ctx = match self.windows.iter().find(|w| w.window_id == window_id) {

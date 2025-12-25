@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
 use std::time::Instant;
@@ -13,6 +14,7 @@ use crate::ContactInfo;
 use crate::Node;
 use crate::PhycisObjectType;
 use crate::AABB;
+use crate::Scene;
 
 #[derive(Debug, Clone)]
 pub struct Collision {
@@ -548,4 +550,155 @@ impl PhysicsSystem {
 			log::info!("Physics update took {:?}", elapsed);
 		}
 	}
+}
+
+#[derive(Debug, Clone)]
+struct SceneCollection {
+	grid: SpatialGrid,
+	physics_system: PhysicsSystem,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct PhysicsWorld {
+	scene_collections: HashMap<ArenaId<Scene>, SceneCollection>,
+	node_aabbs: HashMap<ArenaId<Node>, AABB>,
+	node_scenes: HashMap<ArenaId<Node>, ArenaId<Scene>>,
+}
+
+impl PhysicsWorld {
+	pub fn new() -> Self {
+		Self {
+			scene_collections: HashMap::new(),
+			node_aabbs: HashMap::new(),
+			node_scenes: HashMap::new(),
+		}
+	}
+
+	pub fn ensure_scene(&mut self, scene_id: ArenaId<Scene>) {
+		self.scene_collections.entry(scene_id).or_insert(SceneCollection {
+			grid: SpatialGrid::new(5.0),
+			physics_system: PhysicsSystem::new(),
+		});
+	}
+
+	pub fn set_node_aabb(&mut self, scene_id: ArenaId<Scene>, node_id: ArenaId<Node>, aabb: AABB) {
+		self.ensure_scene(scene_id);
+		if let Some(collection) = self.scene_collections.get_mut(&scene_id) {
+			collection.grid.set_node(node_id, aabb);
+		}
+	}
+
+	pub fn retain_nodes(&mut self, state: &State) {
+		for (_, collection) in &mut self.scene_collections {
+			collection
+				.grid
+				.retain_nodes(|node_id| state.nodes.contains(node_id));
+		}
+		self.node_aabbs
+			.retain(|node_id, _| state.nodes.contains(node_id));
+		self.node_scenes
+			.retain(|node_id, _| state.nodes.contains(node_id));
+	}
+
+	pub fn process(&mut self, state: &mut State, dt: f32) {
+		self.sync_from_state(state);
+
+		for (_, collection) in &mut self.scene_collections {
+			collection
+				.physics_system
+				.physics_update(state, &mut collection.grid, dt);
+			Self::process_raycasts(state, &collection.grid);
+		}
+
+		self.retain_nodes(state);
+	}
+
+	fn sync_from_state(&mut self, state: &State) {
+		for (node_id, node) in &state.nodes {
+			let (scene_id, collision_shape) = match (node.scene_id, &node.collision_shape) {
+				(Some(scene_id), Some(collision_shape)) => (scene_id, collision_shape),
+				_ => {
+					self.remove_node_from_physics(node_id);
+					continue;
+				}
+			};
+
+			let aabb = collision_shape.aabb(node.translation);
+			let prev_scene = self.node_scenes.get(&node_id).copied();
+			let mut needs_update = true;
+
+			if let Some(prev_scene_id) = prev_scene {
+				if prev_scene_id == scene_id {
+					if let Some(prev_aabb) = self.node_aabbs.get(&node_id) {
+						if aabb_equals(prev_aabb, &aabb) {
+							needs_update = false;
+						}
+					}
+				} else if let Some(old_collection) = self.scene_collections.get_mut(&prev_scene_id) {
+					old_collection.grid.rem_node(node_id);
+				}
+			}
+
+			if needs_update {
+				self.ensure_scene(scene_id);
+				if let Some(collection) = self.scene_collections.get_mut(&scene_id) {
+					collection.grid.set_node(node_id, aabb.clone());
+				}
+				self.node_aabbs.insert(node_id, aabb);
+				self.node_scenes.insert(node_id, scene_id);
+			}
+		}
+	}
+
+	fn remove_node_from_physics(&mut self, node_id: ArenaId<Node>) {
+		if let Some(scene_id) = self.node_scenes.remove(&node_id) {
+			if let Some(collection) = self.scene_collections.get_mut(&scene_id) {
+				collection.grid.rem_node(node_id);
+			}
+		}
+		self.node_aabbs.remove(&node_id);
+	}
+
+	fn process_raycasts(state: &mut State, grid: &SpatialGrid) {
+		for (_, ray_cast) in &mut state.raycasts {
+			ray_cast.intersects.clear();
+
+			let node = match state.nodes.get(&ray_cast.node_id) {
+				Some(node) => node,
+				None => continue,
+			};
+
+			let start = node.translation;
+			let end = start + node.rotation * glam::Vec3::new(0.0, 0.0, 1.0) * ray_cast.len;
+			let nodes = grid.get_line_ray_nodes(start, end);
+
+			let mut intersections = Vec::new();
+
+			for node_inx in nodes {
+				if node_inx == ray_cast.node_id {
+					continue;
+				}
+
+				let aabb = match grid.get_node_rect(node_inx) {
+					Some(aabb) => aabb,
+					None => continue,
+				};
+
+				if let Some((tmin, _tmax)) = aabb.intersect_ray(start, end) {
+					intersections.push((tmin, node_inx));
+				}
+			}
+
+			intersections.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+			ray_cast.intersects = intersections
+				.into_iter()
+				.map(|(_, node_inx)| node_inx)
+				.collect();
+		}
+	}
+}
+
+fn aabb_equals(a: &AABB, b: &AABB) -> bool {
+	a.min == b.min && a.max == b.max
 }

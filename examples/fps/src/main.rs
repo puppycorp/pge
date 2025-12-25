@@ -2,6 +2,7 @@ use std::f32::consts::PI;
 use std::time::Instant;
 
 use pge::*;
+use pge::physics::PhysicsWorld;
 use rand::Rng;
 
 #[derive(Debug, Clone)]
@@ -91,6 +92,7 @@ struct Bullet {
 }
 
 pub struct FpsShooter {
+	physics: PhysicsWorld,
 	sensitivity: f32,
 	player_id: Option<ArenaId<Node>>,
 	light_inx: Option<ArenaId<Node>>,
@@ -120,6 +122,7 @@ impl FpsShooter {
 		let mut rng = rand::thread_rng();
 
 		Self {
+			physics: PhysicsWorld::new(),
 			player_id: None,
 			light_inx: None,
 			sensitivity: 0.001,
@@ -584,6 +587,8 @@ impl pge::App for FpsShooter {
 	}
 
 	fn on_process(&mut self, state: &mut State, delta: f32) {
+		self.physics.process(state, delta);
+
 		for orc in &mut self.orcs {
 			orc.on_process(self.player_id.unwrap(), state);
 		}
