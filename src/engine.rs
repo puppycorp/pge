@@ -574,13 +574,18 @@ where
 		self.app.on_mouse_input(window_ctx.window_id, event, &mut self.state);
     }
 
-    pub fn on_keyboard_input(&mut self, window: WindowHandle, key: KeyboardKey, action: KeyAction) {
+	pub fn on_keyboard_input(&mut self, window: WindowHandle, key: KeyboardKey, action: KeyAction) {
 		let window_ctx = match self.windows.iter().find(|w| w.window == window) {
 			Some(w) => w,
 			None => return,
 		};
 		self.app.on_keyboard_input(window_ctx.window_id, key, action, &mut self.state);
     }
+
+	pub fn tick_headless(&mut self, dt: f32) {
+		self.process_nodes();
+		self.app.on_process(&mut self.state, dt);
+	}
 
     pub fn render(&mut self, dt: f32) {
 		let fps = (1.0 / dt) as u32;
@@ -646,7 +651,7 @@ where
 					}
                 };
                 
-                pass.bind_buffer(0, camera_buffer.handle);
+				pass.bind_buffer(0, camera_buffer.handle);
                 pass.bind_buffer(1, point_light_buffer.handle);
 
                 for call in calls {

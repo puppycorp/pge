@@ -1,6 +1,9 @@
 use std::process;
 use std::sync::Arc;
+use std::thread::sleep;
+use std::time::Duration;
 use std::time::Instant;
+use std::env;
 use futures::executor::block_on;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
@@ -17,6 +20,7 @@ use crate::hardware::PipelineHandle;
 use crate::hardware::RenderEncoder;
 use crate::hardware::TextureHandle;
 use crate::hardware::WindowHandle;
+use crate::mock_hardware::MockHardware;
 use crate::KeyAction;
 use crate::MouseEvent;
 use super::wgpu_types::*;
@@ -757,6 +761,9 @@ where
 }
 
 pub fn run(app: impl App) -> anyhow::Result<()> {
+	if is_headless() {
+		return run_headless(app);
+	}
 	let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
 	let adapters = instance.enumerate_adapters(wgpu::Backends::all());
 	for adapter in adapters {
@@ -792,6 +799,28 @@ pub fn run(app: impl App) -> anyhow::Result<()> {
 	let engine = Engine::new(app, hardware);
 	let mut handler = PgeWininitHandler::new(engine, adapter, device, queue, instance);
 	Ok(event_loop.run_app(&mut handler)?)
+}
+
+fn is_headless() -> bool {
+	matches!(env::var("HEADLESS").as_deref(), Ok("1"))
+}
+
+fn run_headless(app: impl App) -> anyhow::Result<()> {
+	let hardware = MockHardware::new();
+	let mut engine = Engine::new(app, hardware);
+	let mut last_tick = Instant::now();
+	let target_dt = Duration::from_millis(16);
+
+	loop {
+		let elapsed = last_tick.elapsed();
+		if elapsed < target_dt {
+			sleep(target_dt - elapsed);
+			continue;
+		}
+		let dt = elapsed.as_secs_f32();
+		last_tick = Instant::now();
+		engine.tick_headless(dt);
+	}
 }
 
 struct BufferContext {
