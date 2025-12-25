@@ -94,6 +94,8 @@ struct PipelineContext {
 struct PgeWininitHandler<'a, A, H> {
 	engine: Engine<A, H>,
 	last_on_process_time: Instant,
+	max_iterations: Option<u64>,
+	iterations: u64,
 	windows: Vec<WindowContext<'a>>,
 	adapter: Arc<wgpu::Adapter>,
 	device: Arc<wgpu::Device>,
@@ -105,10 +107,12 @@ struct PgeWininitHandler<'a, A, H> {
 }
 
 impl<'a, A, H> PgeWininitHandler<'a, A, H> {
-	fn new(engine: Engine<A, H>, adapter: Arc<wgpu::Adapter>, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, instance: Arc<wgpu::Instance>) -> Self {
+	fn new(engine: Engine<A, H>, adapter: Arc<wgpu::Adapter>, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, instance: Arc<wgpu::Instance>, max_iterations: Option<u64>) -> Self {
 		Self {
 			engine,
 			last_on_process_time: Instant::now(),
+			max_iterations,
+			iterations: 0,
 			windows: Vec::new(),
 			adapter,
 			device,
@@ -607,6 +611,13 @@ where
 		}
 		self.last_on_process_time = Instant::now();
 		self.engine.render(dt);
+		self.iterations += 1;
+		if let Some(max) = self.max_iterations {
+			if self.iterations >= max {
+				log::info!("Exiting: ITERATIONS limit reached ({}).", max);
+				event_loop.exit();
+			}
+		}
 	}
 
 	fn window_event(
@@ -797,7 +808,8 @@ pub fn run(app: impl App) -> anyhow::Result<()> {
 	let proxy = event_loop.create_proxy();
 	let hardware = WgpuHardware::new(proxy, instance.clone(), adapter.clone(), device.clone(), queue.clone());
 	let engine = Engine::new(app, hardware);
-	let mut handler = PgeWininitHandler::new(engine, adapter, device, queue, instance);
+	let max_iterations = read_iterations();
+	let mut handler = PgeWininitHandler::new(engine, adapter, device, queue, instance, max_iterations);
 	Ok(event_loop.run_app(&mut handler)?)
 }
 
@@ -810,8 +822,16 @@ fn run_headless(app: impl App) -> anyhow::Result<()> {
 	let mut engine = Engine::new(app, hardware);
 	let mut last_tick = Instant::now();
 	let target_dt = Duration::from_millis(16);
+	let max_iterations = read_iterations();
+	let mut iterations = 0u64;
 
 	loop {
+		if let Some(max) = max_iterations {
+			if iterations >= max {
+				log::info!("Headless exiting: ITERATIONS limit reached ({}).", max);
+				break;
+			}
+		}
 		let elapsed = last_tick.elapsed();
 		if elapsed < target_dt {
 			sleep(target_dt - elapsed);
@@ -820,6 +840,15 @@ fn run_headless(app: impl App) -> anyhow::Result<()> {
 		let dt = elapsed.as_secs_f32();
 		last_tick = Instant::now();
 		engine.tick_headless(dt);
+		iterations += 1;
+	}
+	Ok(())
+}
+
+fn read_iterations() -> Option<u64> {
+	match env::var("ITERATIONS") {
+		Ok(value) => value.parse::<u64>().ok(),
+		Err(_) => None,
 	}
 }
 
