@@ -169,7 +169,7 @@ impl FpsShooter {
 						return;
 					}
 	
-					// log::info!("player ray intersects: {:?}", player_ray.intersects);
+					// pge::log2!("player ray intersects: {:?}", player_ray.intersects);
 	
 					let translation = {
 						let player_inx = match self.player_id {
@@ -242,7 +242,7 @@ impl FpsShooter {
 
 
 		if let Some(bullet_mesh_id) = self.bullet_mesh {
-			log::info!("spawn bullet");
+			pge::log2!("spawn bullet");
 			let mut bullet = Node::new();
 			bullet.mesh = Some(bullet_mesh_id);
 			bullet.physics.typ = PhycisObjectType::Dynamic;
@@ -309,7 +309,7 @@ impl FpsShooter {
 				force.y = 0.0;
 
 				self.move_force = force;
-				// log::info!("force: {:?}", player.physics.force);
+				// pge::log2!("force: {:?}", player.physics.force);
 			} else {
 				// We calculate force opposite of momevement to slow down the player
 				let force = -player.physics.velocity.xz() * self.movement_force;
@@ -348,7 +348,7 @@ impl pge::App for FpsShooter {
 		let bullet_mesh_id = state.meshes.insert(bullet_mesh);
 		self.bullet_mesh = Some(bullet_mesh_id);
 
-		// log::info!("continue");
+		// pge::log2!("continue");
 
 		let mut rng = rand::thread_rng();
 
@@ -369,7 +369,7 @@ impl pge::App for FpsShooter {
 			self.orcs.push(orc);
 		}
 
-		log::info!("continue2");
+		pge::log2!("continue2");
 
 		let texture = Texture::new("./assets/gandalf.jpg");
 	 	let texture_id = state.textures.insert(texture);
@@ -614,7 +614,7 @@ impl pge::App for FpsShooter {
 
 		self.bullets.retain(|bullet| {
 			if bullet.spawned.elapsed().as_secs_f32() > 5.0 {
-				log::info!("depspawn bullet {}", bullet.node_id);
+				pge::log2!("depspawn bullet {}", bullet.node_id);
 				state.nodes.remove(&bullet.node_id);
 				false
 			} else {
@@ -626,6 +626,6 @@ impl pge::App for FpsShooter {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-	simple_logger::init_with_level(log::Level::Info)?;
+	pge::init_logging();
 	Ok(pge::run(FpsShooter::new())?)
 }

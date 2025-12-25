@@ -174,7 +174,7 @@ where
 		let sort_timer = Instant::now();
 		topo_sort_nodes(&self.state.nodes, &mut self.topo_sorted_nodes);
 		if sort_timer.elapsed() > Duration::from_millis(10) {
-			log::info!("Topo sort {} nodes took {:?}", self.topo_sorted_nodes.len(), sort_timer.elapsed());
+			crate::log3!("Topo sort {} nodes took {:?}", self.topo_sorted_nodes.len(), sort_timer.elapsed());
 		}
 
 		for node_id in &self.topo_sorted_nodes {
@@ -216,7 +216,7 @@ where
 
 		let elapsed = timer.elapsed();
 		if elapsed > Duration::from_millis(5) {
-			log::info!("Node processing took {:?}", elapsed);
+			crate::log3!("Node processing took {:?}", elapsed);
 		}
 	}
 
@@ -231,13 +231,13 @@ where
 
 			match &texture.source {
 				TextureSource::File(path) => {
-					log::info!("Loading texture from file: {:?}", path);
+					crate::log2!("Loading texture from file: {:?}", path);
 					match image::open(&path) {
 						Ok(img) => {
 							let img: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> = img.to_rgba8();
 							let dim = img.dimensions();
 							data = img.into_raw();
-							log::info!("Image loaded: {}x{}", dim.0, dim.1);
+							crate::log2!("Image loaded: {}x{}", dim.0, dim.1);
 							width = dim.0 as u32;
 							height = dim.1 as u32;
 						}
@@ -275,7 +275,7 @@ where
 				emissive_factor: material.emissive_factor,
 				_padding: 0.0,
 			};
-			log::info!("new material: {:?}", raw_material);
+			crate::log4!("new material: {:?}", raw_material);
 
 			let buffer = self.hardware.create_buffer(&format!("material_buffer_{:?}", material_id.index()), 1000);
 			self.hardware.write_buffer(buffer, bytemuck::bytes_of(&raw_material));
@@ -372,11 +372,11 @@ where
 			buffer.flush(&mut self.hardware);
 		}
 		if flush_timer.elapsed() > Duration::from_millis(10) {
-			log::info!("Flushing buffers took {:?}", flush_timer.elapsed());
+			crate::log3!("Flushing buffers took {:?}", flush_timer.elapsed());
 		}
 
 		if timer.elapsed() > Duration::from_millis(10) {
-			log::info!("Mesh processing took {:?}", timer.elapsed());
+			crate::log3!("Mesh processing took {:?}", timer.elapsed());
 		}
     }
 
@@ -426,7 +426,7 @@ where
 			let light = RawPointLight::new(light.color, light.intensity, pos);
 
 			self.point_light_buffers.entry(scene_id).or_insert_with(|| {
-				log::info!("Creating new point light buffer for scene ID: {:?}", scene_id);
+				crate::log2!("Creating new point light buffer for scene ID: {:?}", scene_id);
 				Buffer::new(self.hardware.create_buffer("pointlight", 1000))
 			}).write(bytemuck::bytes_of(&light));
 		}
@@ -441,7 +441,7 @@ where
 				.ui_compositors
 				.entry(ui_id.clone())
 				.or_insert_with(|| {
-					log::info!("Creating new Compositor for UI ID: {:?}", ui_id); // Debug print
+					crate::log2!("Creating new Compositor for UI ID: {:?}", ui_id); // Debug print
 					Compositor::new()
 				});
 			c.process(gui);
@@ -450,7 +450,7 @@ where
 				.gui_buffers
 				.entry(ui_id)
 				.or_insert_with(|| {
-					log::info!("Creating new GuiBuffers for UI ID: {:?}", ui_id); // Debug print
+					crate::log2!("Creating new GuiBuffers for UI ID: {:?}", ui_id); // Debug print
 					GuiBuffers::new(&mut self.hardware)
 				});
 
@@ -548,7 +548,7 @@ where
 			if self.windows.iter().any(|w| w.window_id == window_id) {
 				continue;
 			}
-			log::info!("Creating window: {:?}", window_id);
+			crate::log1!("Creating window: {:?}", window_id);
             let handle = self.hardware.create_window(&window);
 			let pipeline = self.hardware.create_pipeline("pipeline", handle);
 			self.windows.push(WindowContext {
@@ -590,19 +590,65 @@ where
     pub fn render(&mut self, dt: f32) {
 		let fps = (1.0 / dt) as u32;
 		if (fps as i32 - self.fps as i32).abs() > 10 {
-			log::info!("FPS: {}", fps);
+			crate::log1!("FPS: {}", fps);
 		}
 		self.fps = fps;
 
-		self.process_materials();
-		self.process_textures();
-		self.process_nodes();
-		self.process_meshes();
-		self.process_cameras();
-		self.process_point_lights();
-		self.process_ui();
-		self.update_windows();
-		self.app.on_process(&mut self.state, dt);
+		if crate::debug_level() >= 3 {
+			let frame_start = Instant::now();
+			let timer = Instant::now();
+			self.process_materials();
+			let materials_time = timer.elapsed();
+			let timer = Instant::now();
+			self.process_textures();
+			let textures_time = timer.elapsed();
+			let timer = Instant::now();
+			self.process_nodes();
+			let nodes_time = timer.elapsed();
+			let timer = Instant::now();
+			self.process_meshes();
+			let meshes_time = timer.elapsed();
+			let timer = Instant::now();
+			self.process_cameras();
+			let cameras_time = timer.elapsed();
+			let timer = Instant::now();
+			self.process_point_lights();
+			let lights_time = timer.elapsed();
+			let timer = Instant::now();
+			self.process_ui();
+			let ui_time = timer.elapsed();
+			let timer = Instant::now();
+			self.update_windows();
+			let windows_time = timer.elapsed();
+			let timer = Instant::now();
+			self.app.on_process(&mut self.state, dt);
+			let app_time = timer.elapsed();
+			let total_time = frame_start.elapsed();
+
+			crate::log3!(
+				"Frame timings: materials={:?}, textures={:?}, nodes={:?}, meshes={:?}, cameras={:?}, lights={:?}, ui={:?}, windows={:?}, app={:?}, total={:?}",
+				materials_time,
+				textures_time,
+				nodes_time,
+				meshes_time,
+				cameras_time,
+				lights_time,
+				ui_time,
+				windows_time,
+				app_time,
+				total_time
+			);
+		} else {
+			self.process_materials();
+			self.process_textures();
+			self.process_nodes();
+			self.process_meshes();
+			self.process_cameras();
+			self.process_point_lights();
+			self.process_ui();
+			self.update_windows();
+			self.app.on_process(&mut self.state, dt);
+		}
         for (window_id, _) in &self.state.windows {
 			let ctx = match self.windows.iter().find(|w| w.window_id == window_id) {
 				Some(ctx) => ctx,

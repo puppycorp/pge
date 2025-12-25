@@ -44,7 +44,7 @@ impl ParserState {
 }
 
 pub fn load_node(n: &gltf::Node, buffers: &[Data], state: &mut State, parser_state: &mut ParserState, parent: NodeParent) {
-	log::info!("Loading node: {}", n.name().unwrap_or("Unnamed"));
+	crate::log2!("Loading node: {}", n.name().unwrap_or("Unnamed"));
 
 	let mut node = Node {
 		name: Some(n.name().unwrap_or_default().to_string()),
@@ -60,12 +60,12 @@ pub fn load_node(n: &gltf::Node, buffers: &[Data], state: &mut State, parser_sta
 
 	match n.mesh() {
 		Some(gltf_mesh) => {
-			log::info!("Mesh: {}", gltf_mesh.name().unwrap_or("Unnamed"));
+			crate::log2!("Mesh: {}", gltf_mesh.name().unwrap_or("Unnamed"));
 			let mut mesh = Mesh::new();
 			for p in gltf_mesh.primitives() {
 				let mut primitive = Primitive::new(PrimitiveTopology::from_mode(p.mode()));
 
-				log::info!("- Primitive #{}", p.index());
+				crate::log2!("- Primitive #{}", p.index());
 
 				let reader = p.reader(|buffer| {
 					let buffer_data = &buffers[buffer.index()];
@@ -124,7 +124,7 @@ pub fn load_node(n: &gltf::Node, buffers: &[Data], state: &mut State, parser_sta
 			node.mesh = Some(mesh_id);
 		},
 		None => {
-			log::info!("Node does not contain a mesh");
+			crate::log2!("Node does not contain a mesh");
 		}
 	}
 	
@@ -153,7 +153,7 @@ pub fn load_scene(s: &gltf::Scene, buffers: &[Data], state: &mut State, parser_s
 }
 
 pub fn load_animation(anim: &gltf::Animation, buffers: &[Data], state: &mut State, parser_state: &mut ParserState) {
-	log::info!("Loading animation: {}", anim.name().unwrap_or("Unnamed"));
+	crate::log2!("Loading animation: {}", anim.name().unwrap_or("Unnamed"));
 
 	let mut animation = Animation::new();
 
@@ -263,7 +263,7 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 	let mut parser_state = ParserState::new();
 
 	let p = p.as_ref();
-	log::info!("loading {:?}", p.to_string_lossy());
+	crate::log2!("loading {:?}", p.to_string_lossy());
 
 	let (document, buffers, images) = match gltf::import(p) {
 		Ok(r) => r,
@@ -274,7 +274,7 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 	};
 
 	for image in images {
-		log::info!("Image: {}x{}", image.width, image.height);
+		crate::log2!("Image: {}x{}", image.width, image.height);
 	}
 
 	for animation in document.animations() {
@@ -282,12 +282,12 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 	}
 
 	for texture in document.textures() {
-		log::info!("Texture: {}", texture.name().unwrap_or("Unnamed"));
+		crate::log2!("Texture: {}", texture.name().unwrap_or("Unnamed"));
 		let s = texture.source();
 		let source = s.source();
 		let texture_id = match source {
 			Source::View { view, mime_type } => {
-				log::info!("mime_type: {}", mime_type);
+				crate::log2!("mime_type: {}", mime_type);
 				// Retrieve the buffer associated with the view
 				let buffer = view.buffer();
 				let buffer_index = buffer.index();
@@ -313,8 +313,8 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 				})
 			},
 			Source::Uri { uri, mime_type } => {
-				log::info!("uri: {}", uri);
-				log::info!("mime_type: {}", mime_type.unwrap_or("None"));
+				crate::log2!("uri: {}", uri);
+				crate::log2!("mime_type: {}", mime_type.unwrap_or("None"));
 				todo!()
 			}
 		};
@@ -323,7 +323,7 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 	}
 
 	for gltf_material in document.materials() {
-		log::info!("Material: {}", gltf_material.name().unwrap_or("Unnamed"));
+		crate::log2!("Material: {}", gltf_material.name().unwrap_or("Unnamed"));
 		let material_index = match gltf_material.index() {
 			Some(index) => index,
 			None => {
@@ -339,7 +339,7 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 		};
 
 		if let Some(base_color_texture) = pbr.base_color_texture() {
-			log::info!("base_color_texture: {}", base_color_texture.texture().index());
+			crate::log2!("base_color_texture: {}", base_color_texture.texture().index());
 			let pbr_texture_id = match parser_state.texture_map.get(&base_color_texture.texture().index()) {
 				Some(id) => id,
 				None => {
@@ -352,7 +352,7 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 		material.base_color_factor = pbr.base_color_factor();
 
 		if let Some(metallic_roughness_texture) = pbr.metallic_roughness_texture() {
-			log::info!("metallic_roughness_texture: {}", metallic_roughness_texture.texture().index());
+			crate::log2!("metallic_roughness_texture: {}", metallic_roughness_texture.texture().index());
 			let texture_id = match parser_state.texture_map.get(&metallic_roughness_texture.texture().index()) {
 				Some(id) => id,
 				None => {
@@ -365,7 +365,7 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 		material.roughness_factor = pbr.roughness_factor();
 
 		if let Some(normal_texture) = gltf_material.normal_texture() {
-			log::info!("normal_texture: {}", normal_texture.texture().index());
+			crate::log2!("normal_texture: {}", normal_texture.texture().index());
 			// normal_texture.tex_coord() TODO how to handle ?
 			let texture_id = match parser_state.texture_map.get(&normal_texture.texture().index()) {
 				Some(id) => id,
@@ -378,7 +378,7 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 		}
 
 		if let Some(occlusion_texture) = gltf_material.occlusion_texture() {
-			log::info!("occlusion_texture: {}", occlusion_texture.texture().index());
+			crate::log2!("occlusion_texture: {}", occlusion_texture.texture().index());
 			let texture_id = match parser_state.texture_map.get(&occlusion_texture.texture().index()) {
 				Some(id) => id,
 				None => {
@@ -390,7 +390,7 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 		}
 
 		if let Some(emissive_texture) = gltf_material.emissive_texture() {
-			log::info!("emissive_texture: {}", emissive_texture.texture().index());
+			crate::log2!("emissive_texture: {}", emissive_texture.texture().index());
 			let texture_id = match parser_state.texture_map.get(&emissive_texture.texture().index()) {
 				Some(id) => id,
 				None => {
@@ -405,17 +405,17 @@ pub fn load_gltf<P: AsRef<Path>>(p: P, state: &mut State) -> Model3D {
 	}
 
 	for skin in document.skins() {
-		log::info!("Skin: {}", skin.name().unwrap_or("Unnamed"));
+		crate::log2!("Skin: {}", skin.name().unwrap_or("Unnamed"));
 	}
 
 	if let Some(s) = document.default_scene() {
-		log::info!("Default scene: {}", s.name().unwrap_or("Unnamed"));
+		crate::log2!("Default scene: {}", s.name().unwrap_or("Unnamed"));
 		let scene_id = load_scene(&s, &buffers, state, &mut parser_state);
 		model.default_scene = Some(scene_id);
 	}
 
 	for s in document.scenes() {
-		log::info!("Scene: {}", s.name().unwrap_or("Unnamed"));
+		crate::log2!("Scene: {}", s.name().unwrap_or("Unnamed"));
 		let scene_id = load_scene(&s, &buffers, state, &mut parser_state);
 		model.scenes.push(scene_id);
 	}
@@ -435,6 +435,6 @@ mod tests {
 		load_gltf("./assets/orkki.glb", &mut state);
 		state.print_state();
 
-		log::info!("materials: {:#?}", state.materials);
+	crate::log4!("materials: {:#?}", state.materials);
 	}
 }

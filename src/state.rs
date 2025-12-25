@@ -68,16 +68,16 @@ impl State {
     }
 
     pub fn print_state(&self) {
-        log::info!("scene count: {:?}", self.scenes.len());
-        log::info!("mesh count: {:?}", self.meshes.len());
-        log::info!("node count: {:?}", self.nodes.len());
-        log::info!("camera count: {:?}", self.cameras.len());
-        log::info!("window count: {:?}", self.windows.len());
-        log::info!("gui count: {:?}", self.guis.len());
-        log::info!("point light count: {:?}", self.point_lights.len());
-        log::info!("texture count: {:?}", self.textures.len());
-        log::info!("raycast count: {:?}", self.raycasts.len());
-        log::info!("joint count: {:?}", self.joints.len());
+        crate::log2!("scene count: {:?}", self.scenes.len());
+        crate::log2!("mesh count: {:?}", self.meshes.len());
+        crate::log2!("node count: {:?}", self.nodes.len());
+        crate::log2!("camera count: {:?}", self.cameras.len());
+        crate::log2!("window count: {:?}", self.windows.len());
+        crate::log2!("gui count: {:?}", self.guis.len());
+        crate::log2!("point light count: {:?}", self.point_lights.len());
+        crate::log2!("texture count: {:?}", self.textures.len());
+        crate::log2!("raycast count: {:?}", self.raycasts.len());
+        crate::log2!("joint count: {:?}", self.joints.len());
     }
 
 	pub fn get_scene_bounding_box(&self, scene_id: ArenaId<Scene>) -> AABB {

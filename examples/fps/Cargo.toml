@@ -11,6 +11,5 @@ pge = { path = "../../", features = ["wgpu_winit"] }
 async-trait = "0.1"
 anyhow = "1"
 glam = "0.27"
-simple_logger = "5"
 log = "0.4"
 rand = "0.8.5"

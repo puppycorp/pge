@@ -17,11 +17,11 @@ impl ChangePrinter {
         if self.prev.contains_key(&(slot as u32)) {
 			let prev = self.prev.get(&(slot as u32)).unwrap();
 			if prev != &new {
-				log::info!("{}", new);
+				crate::log2!("{}", new);
 				self.prev.insert(slot as u32, new);
 			}
 		} else {
-			log::info!("{}", new);
+			crate::log2!("{}", new);
 			self.prev.insert(slot as u32, new);
 		}
     }

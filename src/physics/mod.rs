@@ -413,7 +413,7 @@ impl PhysicsSystem {
 					if !node1_aabb.intersects(&node2_aabb) {
 						continue;
 					}
-					log::info!("node1: {:?}, node2: {:?} aabb intersect", node1_id, node2_id);
+					crate::log2!("node1: {:?}, node2: {:?} aabb intersect", node1_id, node2_id);
 					let correction = node1_aabb.get_correction(&node2_aabb) * 1.0;
 					self.broad_phase_collisions.push(Collision {
 						node1: node1_id,
@@ -428,14 +428,14 @@ impl PhysicsSystem {
 					if node1.collision_shape.is_none() || node2.collision_shape.is_none() {
 						continue;
 					}
-					log::info!("node1.translation: {:?}", node1.translation);
-					log::info!("node2.translation: {:?}", node2.translation);
+					crate::log4!("node1.translation: {:?}", node1.translation);
+					crate::log4!("node2.translation: {:?}", node2.translation);
 					let collision_info = match get_collision(node1, node2) {
 						Some(info) => info,
 						None => continue,
 					};
 
-					log::info!("collision_info: {:?}", collision_info);
+					crate::log4!("collision_info: {:?}", collision_info);
 
 					self.broad_phase_collisions.push(Collision {
 						node1: node1_id,
@@ -471,7 +471,7 @@ impl PhysicsSystem {
 
 			if self.broad_phase_collisions.len() != self.broad_phase_collision_count {
 				self.broad_phase_collision_count = self.broad_phase_collisions.len();
-				log::info!("collision count: {}", self.broad_phase_collision_count);
+				crate::log2!("collision count: {}", self.broad_phase_collision_count);
 			}
 
 			if self.broad_phase_collisions.is_empty() {
@@ -490,7 +490,7 @@ impl PhysicsSystem {
 					continue;
 				}
 
-				log::info!("collision: {:?}", collision);
+				crate::log4!("collision: {:?}", collision);
 
 				if self.collision_cache.contains(&(collision.node1, collision.node2)) {
 					resolve_collision(&collision, state);
@@ -526,7 +526,7 @@ impl PhysicsSystem {
 				self.update_nodes(state, dt);
 				break;
 			}
-			log::info!("There is a fast boy, need to do toi");
+			crate::log2!("There is a fast boy, need to do toi");
 
 			if let Some(collision) = earliest_collision {
 				// Avoid zero TOI causing infinite loops
@@ -547,7 +547,7 @@ impl PhysicsSystem {
 		}
 		let elapsed = timer.elapsed();
 		if elapsed > Duration::from_millis(10) {
-			log::info!("Physics update took {:?}", elapsed);
+			crate::log3!("Physics update took {:?}", elapsed);
 		}
 	}
 }
@@ -601,16 +601,42 @@ impl PhysicsWorld {
 	}
 
 	pub fn process(&mut self, state: &mut State, dt: f32) {
-		self.sync_from_state(state);
+		if crate::debug_level() >= 3 {
+			let total_start = Instant::now();
+			let timer = Instant::now();
+			self.sync_from_state(state);
+			let sync_time = timer.elapsed();
+			let timer = Instant::now();
+			for (_, collection) in &mut self.scene_collections {
+				collection
+					.physics_system
+					.physics_update(state, &mut collection.grid, dt);
+				Self::process_raycasts(state, &collection.grid);
+			}
+			let update_time = timer.elapsed();
+			let timer = Instant::now();
+			self.retain_nodes(state);
+			let retain_time = timer.elapsed();
+			let total_time = total_start.elapsed();
+			crate::log3!(
+				"Physics timings: sync={:?}, update={:?}, retain={:?}, total={:?}",
+				sync_time,
+				update_time,
+				retain_time,
+				total_time
+			);
+		} else {
+			self.sync_from_state(state);
 
-		for (_, collection) in &mut self.scene_collections {
-			collection
-				.physics_system
-				.physics_update(state, &mut collection.grid, dt);
-			Self::process_raycasts(state, &collection.grid);
+			for (_, collection) in &mut self.scene_collections {
+				collection
+					.physics_system
+					.physics_update(state, &mut collection.grid, dt);
+				Self::process_raycasts(state, &collection.grid);
+			}
+
+			self.retain_nodes(state);
 		}
-
-		self.retain_nodes(state);
 	}
 
 	fn sync_from_state(&mut self, state: &State) {

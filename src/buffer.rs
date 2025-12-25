@@ -52,7 +52,7 @@ impl Buffer {
     pub fn flush(&mut self, hardware: &mut impl Hardware) {
 		if self.data.len() > self.handle.size as usize {
 			let new_size = (self.data.len() as f32 * 1.5) as u64;
-			log::info!("resizing buffer {:?} from {} to {}", self.handle, self.handle.size, new_size);
+			crate::log2!("resizing buffer {:?} from {} to {}", self.handle, self.handle.size, new_size);
 			hardware.destroy_buffer(self.handle);
 			self.handle = hardware.create_buffer("buffer", new_size);
 		}

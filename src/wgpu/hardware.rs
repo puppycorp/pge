@@ -93,9 +93,11 @@ struct PipelineContext {
 
 struct PgeWininitHandler<'a, A, H> {
 	engine: Engine<A, H>,
+	start_time: Instant,
 	last_on_process_time: Instant,
 	max_iterations: Option<u64>,
 	iterations: u64,
+	progress_interval: u64,
 	windows: Vec<WindowContext<'a>>,
 	adapter: Arc<wgpu::Adapter>,
 	device: Arc<wgpu::Device>,
@@ -108,11 +110,16 @@ struct PgeWininitHandler<'a, A, H> {
 
 impl<'a, A, H> PgeWininitHandler<'a, A, H> {
 	fn new(engine: Engine<A, H>, adapter: Arc<wgpu::Adapter>, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, instance: Arc<wgpu::Instance>, max_iterations: Option<u64>) -> Self {
+		let progress_interval = max_iterations
+			.map(iteration_log_interval)
+			.unwrap_or(0);
 		Self {
 			engine,
+			start_time: Instant::now(),
 			last_on_process_time: Instant::now(),
 			max_iterations,
 			iterations: 0,
+			progress_interval,
 			windows: Vec::new(),
 			adapter,
 			device,
@@ -122,6 +129,22 @@ impl<'a, A, H> PgeWininitHandler<'a, A, H> {
 			buffers: Vec::new(),
 			textures: Vec::new(),
 		}
+	}
+
+	fn log_exit_stats(&self) {
+		let runtime = self.start_time.elapsed();
+		let runtime_secs = runtime.as_secs_f64();
+		let avg_fps = if runtime_secs > 0.0 {
+			self.iterations as f64 / runtime_secs
+		} else {
+			0.0
+		};
+		crate::log1!(
+			"Iterations: {} Average FPS: {:.2}, runtime: {:.2}s",
+			self.iterations,
+			avg_fps,
+			runtime_secs
+		);
 	}
 }
 
@@ -449,7 +472,7 @@ where
 				name,
 				size,
 			} => {
-				log::info!("new buffer id: {:?} name: {:?} size: {:?}", buffer_id, name, size);
+				crate::log2!("new buffer id: {:?} name: {:?} size: {:?}", buffer_id, name, size);
 				let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
 					label: Some(&name),
 					size,
@@ -613,8 +636,20 @@ where
 		self.engine.render(dt);
 		self.iterations += 1;
 		if let Some(max) = self.max_iterations {
+			if self.progress_interval > 0 && (self.iterations % self.progress_interval == 0 || self.iterations == max) {
+				let elapsed = self.start_time.elapsed().as_secs_f64();
+				let rate = if elapsed > 0.0 {
+					self.iterations as f64 / elapsed
+				} else {
+					0.0
+				};
+				crate::log1!("Iterations: {}/{} ({:.2} it/s)", self.iterations, max, rate);
+			}
+		}
+		if let Some(max) = self.max_iterations {
 			if self.iterations >= max {
-				log::info!("Exiting: ITERATIONS limit reached ({}).", max);
+				crate::log1!("Exiting: ITERATIONS limit reached ({}).", max);
+				self.log_exit_stats();
 				event_loop.exit();
 			}
 		}
@@ -636,6 +671,8 @@ where
 
 		match event {
 			WindowEvent::CloseRequested => {
+				crate::log1!("Exiting: window close requested.");
+				self.log_exit_stats();
 				event_loop.exit();
 			}
 			WindowEvent::RedrawRequested => {
@@ -752,7 +789,7 @@ where
 				delta,
 				phase,
 			} => {
-				log::info!("scroll delta: {:?}", delta);
+				crate::log2!("scroll delta: {:?}", delta);
 				match delta {
 					MouseScrollDelta::LineDelta(dx, dy) => {
 						let event = MouseEvent::Wheel {
@@ -821,14 +858,19 @@ fn run_headless(app: impl App) -> anyhow::Result<()> {
 	let hardware = MockHardware::new();
 	let mut engine = Engine::new(app, hardware);
 	let mut last_tick = Instant::now();
+	let start_time = Instant::now();
 	let target_dt = Duration::from_millis(16);
 	let max_iterations = read_iterations();
+	let progress_interval = max_iterations
+		.map(iteration_log_interval)
+		.unwrap_or(0);
 	let mut iterations = 0u64;
 
 	loop {
 		if let Some(max) = max_iterations {
 			if iterations >= max {
-				log::info!("Headless exiting: ITERATIONS limit reached ({}).", max);
+				crate::log1!("Headless exiting: ITERATIONS limit reached ({}).", max);
+				log_exit_stats(iterations, start_time);
 				break;
 			}
 		}
@@ -841,6 +883,17 @@ fn run_headless(app: impl App) -> anyhow::Result<()> {
 		last_tick = Instant::now();
 		engine.tick_headless(dt);
 		iterations += 1;
+		if let Some(max) = max_iterations {
+			if progress_interval > 0 && (iterations % progress_interval == 0 || iterations == max) {
+				let elapsed = start_time.elapsed().as_secs_f64();
+				let rate = if elapsed > 0.0 {
+					iterations as f64 / elapsed
+				} else {
+					0.0
+				};
+				crate::log1!("Headless iterations: {}/{} ({:.2} it/s)", iterations, max, rate);
+			}
+		}
 	}
 	Ok(())
 }
@@ -850,6 +903,36 @@ fn read_iterations() -> Option<u64> {
 		Ok(value) => value.parse::<u64>().ok(),
 		Err(_) => None,
 	}
+}
+
+fn iteration_log_interval(max: u64) -> u64 {
+	if max <= 10 {
+		1
+	} else if max <= 100 {
+		10
+	} else if max <= 1000 {
+		100
+	} else if max <= 10_000 {
+		1000
+	} else {
+		10_000
+	}
+}
+
+fn log_exit_stats(iterations: u64, start_time: Instant) {
+	let runtime = start_time.elapsed();
+	let runtime_secs = runtime.as_secs_f64();
+	let avg_fps = if runtime_secs > 0.0 {
+		iterations as f64 / runtime_secs
+	} else {
+		0.0
+	};
+	crate::log1!(
+		"Iterations: {} Average FPS: {:.2}, runtime: {:.2}s",
+		iterations,
+		avg_fps,
+		runtime_secs
+	);
 }
 
 struct BufferContext {
