@@ -135,7 +135,7 @@ impl Default for PhycisObjectType {
 	}
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PhysicsProps {
 	pub typ: PhycisObjectType,
 	pub velocity: glam::Vec3,
@@ -146,6 +146,62 @@ pub struct PhysicsProps {
 	pub angular_velocity: glam::Vec3,
     pub angular_acceleration: glam::Vec3,
 	pub torque: glam::Vec3,
+	pub linear_damping: f32,
+	pub angular_damping: f32,
+	pub restitution: f32,
+	pub friction: f32,
+	pub collision_group: u32,
+	pub collision_mask: u32,
+	pub is_sensor: bool,
+}
+
+impl Default for PhysicsProps {
+	fn default() -> Self {
+		Self {
+			typ: PhycisObjectType::default(),
+			velocity: glam::Vec3::ZERO,
+			acceleration: glam::Vec3::ZERO,
+			mass: 0.0,
+			stationary: false,
+			force: glam::Vec3::ZERO,
+			angular_velocity: glam::Vec3::ZERO,
+			angular_acceleration: glam::Vec3::ZERO,
+			torque: glam::Vec3::ZERO,
+			linear_damping: 0.0,
+			angular_damping: 0.0,
+			restitution: 0.0,
+			friction: 0.5,
+			collision_group: 0b0001,
+			collision_mask: 0xFFFF,
+			is_sensor: false,
+		}
+	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum JointType {
+	Fixed,
+	Revolute {
+		axis: glam::Vec3,
+		limits: Option<(f32, f32)>,
+	},
+	Prismatic {
+		axis: glam::Vec3,
+		limits: Option<(f32, f32)>,
+	},
+	Ball,
+}
+
+#[derive(Debug, Clone)]
+pub struct Joint {
+	pub name: Option<String>,
+	pub body_a: ArenaId<Node>,
+	pub body_b: ArenaId<Node>,
+	pub local_anchor_a: glam::Vec3,
+	pub local_anchor_b: glam::Vec3,
+	pub joint_type: JointType,
+	pub compliance: f32,
+	pub damping: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -284,29 +340,72 @@ impl AABB {
 }
 
 #[derive(Debug, Clone)]
-pub enum CollisionShape {
-	Box { size: glam::Vec3 },
+pub enum ColliderType {
+	Cuboid { size: glam::Vec3 },
+	Sphere { radius: f32 },
+	Capsule { half_height: f32, radius: f32 },
+	Cylinder { half_height: f32, radius: f32 },
+	TriMesh { mesh_id: ArenaId<Mesh> },
+}
+
+#[derive(Debug, Clone)]
+pub struct CollisionShape {
+	pub shape: ColliderType,
+	pub position_offset: glam::Vec3,
+	pub rotation_offset: glam::Quat,
 }
 
 impl CollisionShape {
+	pub fn new(size: glam::Vec3) -> Self {
+		Self {
+			shape: ColliderType::Cuboid { size },
+			position_offset: glam::Vec3::ZERO,
+			rotation_offset: glam::Quat::IDENTITY,
+		}
+	}
+
     pub fn aabb(&self, translation: glam::Vec3) -> AABB {
-        match self {
-            Self::Box { size } => AABB {
-                min: translation - *size,
-                max: translation + *size,
-            }
+		let center = translation + self.position_offset;
+        match &self.shape {
+            ColliderType::Cuboid { size } => AABB {
+                min: center - *size,
+                max: center + *size,
+            },
+			ColliderType::Sphere { radius } => {
+				let extents = glam::Vec3::splat(*radius);
+				AABB {
+					min: center - extents,
+					max: center + extents,
+				}
+			}
+			ColliderType::Capsule { half_height, radius } => {
+				let extents = glam::Vec3::new(*radius, *half_height + *radius, *radius);
+				AABB {
+					min: center - extents,
+					max: center + extents,
+				}
+			}
+			ColliderType::Cylinder { half_height, radius } => {
+				let extents = glam::Vec3::new(*radius, *half_height, *radius);
+				AABB {
+					min: center - extents,
+					max: center + extents,
+				}
+			}
+			ColliderType::TriMesh { .. } => AABB {
+				min: center,
+				max: center,
+			},
         }
     }
 
 	pub fn center_of_mass(&self) -> glam::Vec3 {
-		match self {
-			Self::Box { .. } => glam::Vec3::ZERO,
-		}
+		self.position_offset
 	}
 
     pub fn inertia_tensor(&self) -> glam::Mat3 {
-        match self {
-            Self::Box { size } => {
+        match &self.shape {
+            ColliderType::Cuboid { size } => {
                 // Assuming `size` represents the half-extents of the box
                 let width = size.x * 2.0;
                 let height = size.y * 2.0;
@@ -322,6 +421,7 @@ impl CollisionShape {
                     glam::Vec3::new(0.0, 0.0, Izz),
                 )
             },
+			_ => glam::Mat3::ZERO,
         }
     }
 
@@ -430,8 +530,8 @@ impl Node {
 
 	pub fn center_of_mass(&self) -> glam::Vec3 {
 		match &self.collision_shape {
-			Some(shape) => shape.center_of_mass(),
-			_ => glam::Vec3::ZERO
+			Some(shape) => self.translation + shape.center_of_mass(),
+			_ => self.translation
 		}
 	}
 
@@ -789,6 +889,3 @@ pub trait App {
 	/// Run before physics properties are updated
 	fn on_phycis_update(&mut self, state: &mut State, delta: f32) {}
 }
-
-
-

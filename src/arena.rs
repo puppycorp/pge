@@ -167,10 +167,13 @@ impl<'a, T> Iterator for ArenaIterMut<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
-            while self.current < (*self.arena).items.len() {
+            let len = (*self.arena).items.len();
+            let items_ptr = (*self.arena).items.as_mut_ptr();
+            while self.current < len {
                 let index = self.current;
                 self.current += 1;
-                if let Some(ref mut item) = (*self.arena).items[index] {
+                let slot_ptr = items_ptr.add(index);
+                if let Some(item) = (*slot_ptr).as_mut() {
                     return Some((ArenaId::new(index), item));
                 }
             }

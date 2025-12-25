@@ -8,7 +8,7 @@ use crate::collision_detection::CollisionInfo;
 use crate::spatial_grid::SpatialGrid;
 use crate::state::State;
 use crate::ArenaId;
-use crate::CollisionShape;
+use crate::ColliderType;
 use crate::ContactInfo;
 use crate::Node;
 use crate::PhycisObjectType;
@@ -293,13 +293,18 @@ fn get_collision(node1: &Node, node2: &Node) -> Option<CollisionInfo> {
     };
 
     // Get the world transforms for both nodes
-    let transform1 = node1.global_transform;
-    let transform2 = node2.global_transform;
+    let transform1 = node1.global_transform
+        * glam::Mat4::from_translation(shape1.position_offset)
+        * glam::Mat4::from_quat(shape1.rotation_offset);
+    let transform2 = node2.global_transform
+        * glam::Mat4::from_translation(shape2.position_offset)
+        * glam::Mat4::from_quat(shape2.rotation_offset);
 
-    match (shape1, shape2) {
-        (CollisionShape::Box { size: s1 }, CollisionShape::Box { size: s2 }) => {
+    match (&shape1.shape, &shape2.shape) {
+        (ColliderType::Cuboid { size: s1 }, ColliderType::Cuboid { size: s2 }) => {
 			obb_collide(transform1, *s1, transform2, *s2)
 		}
+		_ => None,
     }
 }
 

@@ -71,7 +71,7 @@ impl Orc {
 	// 	// orc_node.mesh = Some(asset_id);
 	// 	orc_node.physics.typ = PhycisObjectType::Dynamic;
 	// 	orc_node.physics.mass = 10.0;
-	// 	orc_node.collision_shape = Some(CollisionShape::Box { size: glam::Vec3::new(1.0, 2.0, 1.0) });
+	// 	orc_node.collision_shape = Some(CollisionShape::new(glam::Vec3::new(1.0, 2.0, 1.0)));
 	// 	let node_id = state.nodes.insert(orc_node);
 	// 	self.node_id = Some(node_id);
 	// }
@@ -244,7 +244,7 @@ impl FpsShooter {
 			bullet.mesh = Some(bullet_mesh_id);
 			bullet.physics.typ = PhycisObjectType::Dynamic;
 			bullet.physics.mass = 1.0;
-			bullet.collision_shape = Some(CollisionShape::Box { size: glam::Vec3::new(0.3, 0.3, 0.3) });
+			bullet.collision_shape = Some(CollisionShape::new(glam::Vec3::new(0.3, 0.3, 0.3)));
 			bullet.parent = NodeParent::Scene(self.main_scene.unwrap());
 			let rotation = state.nodes.get(&player_inx).unwrap().rotation;
 			let mut translation = state.nodes.get(&player_inx).unwrap().translation;
@@ -356,7 +356,7 @@ impl pge::App for FpsShooter {
 			node.physics.typ = PhycisObjectType::Dynamic;
 			node.physics.mass = 10.0;
 			node.lock_rotation = true;
-			node.collision_shape = Some(CollisionShape::Box { size: glam::Vec3::new(1.0, 3.0, 1.0) });
+			node.collision_shape = Some(CollisionShape::new(glam::Vec3::new(1.0, 3.0, 1.0)));
 			let x = rng.gen_range(-20.0..20.0);
 			let z = rng.gen_range(-20.0..20.0);
 			let pos = Vec3::new(x, 10.0, z);
@@ -402,7 +402,7 @@ impl pge::App for FpsShooter {
 		plane_node.mesh = Some(plane_mesh);
 		plane_node.physics.typ = PhycisObjectType::Static;
 		plane_node.scale = glam::Vec3::new(plane_size, 1.0, plane_size);
-		plane_node.collision_shape = Some(CollisionShape::Box { size: glam::Vec3::new(plane_size, 0.1, plane_size) });
+		plane_node.collision_shape = Some(CollisionShape::new(glam::Vec3::new(plane_size, 0.1, plane_size)));
 		plane_node.parent = NodeParent::Scene(main_scene_id);
 		let plane_node_id = state.nodes.insert(plane_node);
 
@@ -412,7 +412,7 @@ impl pge::App for FpsShooter {
 		player.physics.typ = PhycisObjectType::Dynamic;
 		player.physics.mass = 70.0;
 		//player.looking_at(0.0, 0.0, 0.0);
-		player.collision_shape = Some(CollisionShape::Box { size: glam::Vec3::new(1.0, 2.0, 1.0) });
+		player.collision_shape = Some(CollisionShape::new(glam::Vec3::new(1.0, 2.0, 1.0)));
 		player.parent = NodeParent::Scene(main_scene_id);
 		player.lock_rotation = true;
 		let player_id = state.nodes.insert(player);
@@ -455,7 +455,7 @@ impl pge::App for FpsShooter {
 			cube_node.mesh = Some(cube_mesh);
 			cube_node.physics.typ = PhycisObjectType::Dynamic;
 			cube_node.physics.mass = 10.0;
-			cube_node.collision_shape = Some(CollisionShape::Box { size: glam::Vec3::new(1.0, 1.0, 1.0) });
+			cube_node.collision_shape = Some(CollisionShape::new(glam::Vec3::new(1.0, 1.0, 1.0)));
 			cube_node.parent = NodeParent::Scene(main_scene_id);
 			let node_id = state.nodes.insert(cube_node);
 		}

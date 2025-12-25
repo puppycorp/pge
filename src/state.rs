@@ -21,6 +21,7 @@ pub struct State {
     pub models: Arena<Model3D>,
     pub animations: Arena<Animation>,
     pub materials: Arena<Material>,
+    pub joints: Arena<Joint>,
     pub keyboard: Option<Keyboard>,
 }
 
@@ -54,7 +55,16 @@ impl State {
     }
 
     pub fn mem_size(&self) -> usize {
-        self.scenes.mem_size() + self.meshes.mem_size() + self.nodes.mem_size() + self.cameras.mem_size() + self.windows.mem_size() + self.guis.mem_size() + self.point_lights.mem_size() + self.textures.mem_size() + self.raycasts.mem_size()
+        self.scenes.mem_size()
+            + self.meshes.mem_size()
+            + self.nodes.mem_size()
+            + self.cameras.mem_size()
+            + self.windows.mem_size()
+            + self.guis.mem_size()
+            + self.point_lights.mem_size()
+            + self.textures.mem_size()
+            + self.raycasts.mem_size()
+            + self.joints.mem_size()
     }
 
     pub fn print_state(&self) {
@@ -67,6 +77,7 @@ impl State {
         log::info!("point light count: {:?}", self.point_lights.len());
         log::info!("texture count: {:?}", self.textures.len());
         log::info!("raycast count: {:?}", self.raycasts.len());
+        log::info!("joint count: {:?}", self.joints.len());
     }
 
 	pub fn get_scene_bounding_box(&self, scene_id: ArenaId<Scene>) -> AABB {

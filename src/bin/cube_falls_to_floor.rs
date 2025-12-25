@@ -33,7 +33,7 @@ impl App for TestApp {
 		cube_node.mesh = Some(cube_mesh);
 		cube_node.physics.typ = PhycisObjectType::Dynamic;
 		cube_node.physics.mass = 10.0;
-		cube_node.collision_shape = Some(CollisionShape::Box { size: Vec3::new(1.0, 1.0, 1.0) });
+		cube_node.collision_shape = Some(CollisionShape::new(Vec3::new(1.0, 1.0, 1.0)));
 		cube_node.parent = NodeParent::Scene(scene_id);
 		state.nodes.insert(cube_node);
 
@@ -43,7 +43,7 @@ impl App for TestApp {
 		cube2_node.mesh = Some(cube_mesh);
 		cube2_node.physics.typ = PhycisObjectType::Dynamic;
 		cube2_node.physics.mass = 10.0;
-		cube2_node.collision_shape = Some(CollisionShape::Box { size: Vec3::new(1.0, 1.0, 1.0) });
+		cube2_node.collision_shape = Some(CollisionShape::new(Vec3::new(1.0, 1.0, 1.0)));
 		cube2_node.rotation = Quat::from_euler(EulerRot::XYZ, 0.1, 0.0, 0.0);
 		cube2_node.parent = NodeParent::Scene(scene_id);
 		state.nodes.insert(cube2_node);
@@ -54,7 +54,7 @@ impl App for TestApp {
 		floor_node.mesh = Some(floor_mesh);
 		floor_node.parent = NodeParent::Scene(scene_id);
 		floor_node.physics.typ = PhycisObjectType::Static;
-		floor_node.collision_shape = Some(CollisionShape::Box { size: Vec3::new(100.0, 0.1, 100.0) });
+		floor_node.collision_shape = Some(CollisionShape::new(Vec3::new(100.0, 0.1, 100.0)));
 		state.nodes.insert(floor_node);
 
 		let mut camera = Camera::new();

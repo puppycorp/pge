@@ -36,7 +36,7 @@ impl pge::App for JustCube {
 		cube_node.mesh = Some(cube_mesh);
 		cube_node.physics.typ = PhycisObjectType::Dynamic;
 		cube_node.physics.mass = 10.0;
-		cube_node.collision_shape = Some(CollisionShape::Box { size: Vec3::new(1.0, 1.0, 1.0) });
+		cube_node.collision_shape = Some(CollisionShape::new(Vec3::new(1.0, 1.0, 1.0)));
 		cube_node.parent = NodeParent::Scene(scene_id);
 		self.cube_node_id = Some(state.nodes.insert(cube_node));
 

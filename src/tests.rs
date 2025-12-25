@@ -29,7 +29,7 @@ use engine::Engine;
 						..Default::default()
 					},
 					translation: Vec3::new(0.0, 1.0, 0.0),
-					collision_shape: Some(CollisionShape::Box { size: Vec3::new(10.0, 1.0, 10.0) }),
+					collision_shape: Some(CollisionShape::new(Vec3::new(10.0, 1.0, 10.0))),
 					parent: NodeParent::Scene(scene_id),
 					..Default::default()
 				};
@@ -45,7 +45,7 @@ use engine::Engine;
 					},
 					lock_rotation: true,
 					translation: Vec3::new(0.0, 10.0, 0.0),
-					collision_shape: Some(CollisionShape::Box { size: Vec3::new(1.0, 1.0, 1.0) }),
+					collision_shape: Some(CollisionShape::new(Vec3::new(1.0, 1.0, 1.0))),
 					parent: NodeParent::Scene(scene_id),
 					..Default::default()
 				};
@@ -93,7 +93,7 @@ use engine::Engine;
 						..Default::default()
 					},
 					translation: Vec3::new(0.0, 1.0, 0.0),
-					collision_shape: Some(CollisionShape::Box { size: Vec3::new(10.0, 1.0, 10.0) }),
+					collision_shape: Some(CollisionShape::new(Vec3::new(10.0, 1.0, 10.0))),
 					parent: NodeParent::Scene(scene_id),
 					..Default::default()
 				};
@@ -109,7 +109,7 @@ use engine::Engine;
 						..Default::default()
 					},
 					translation: Vec3::new(0.0, 10.0, 0.0),
-					collision_shape: Some(CollisionShape::Box { size: Vec3::new(1.0, 1.0, 1.0) }),
+					collision_shape: Some(CollisionShape::new(Vec3::new(1.0, 1.0, 1.0))),
 					parent: NodeParent::Scene(scene_id),
 					..Default::default()
 				};
