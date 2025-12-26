@@ -413,7 +413,7 @@ impl PhysicsSystem {
 					if !node1_aabb.intersects(&node2_aabb) {
 						continue;
 					}
-					crate::log2!("node1: {:?}, node2: {:?} aabb intersect", node1_id, node2_id);
+					crate::log4!("node1: {:?}, node2: {:?} aabb intersect", node1_id, node2_id);
 					let correction = node1_aabb.get_correction(&node2_aabb) * 1.0;
 					self.broad_phase_collisions.push(Collision {
 						node1: node1_id,
