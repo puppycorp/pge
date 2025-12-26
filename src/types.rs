@@ -889,3 +889,7 @@ pub trait App {
 	/// Run before physics properties are updated
 	fn on_phycis_update(&mut self, state: &mut State, delta: f32) {}
 }
+
+pub trait Plugin {
+	fn process(&mut self, state: &mut State, dt: f32);
+}

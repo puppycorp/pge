@@ -4,6 +4,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use glam::Vec3;
+use crate::Plugin;
 use crate::collision_detection::obb_collide;
 use crate::collision_detection::CollisionInfo;
 use crate::spatial_grid::SpatialGrid;
@@ -726,6 +727,15 @@ impl PhysicsWorld {
 		}
 	}
 }
+
+impl Plugin for PhysicsWorld {
+	fn process(&mut self, state: &mut State, dt: f32) {
+		PhysicsWorld::process(self, state, dt);
+	}
+}
+
+#[cfg(test)]
+mod tests;
 
 fn aabb_equals(a: &AABB, b: &AABB) -> bool {
 	a.min == b.min && a.max == b.max

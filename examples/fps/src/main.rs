@@ -1,5 +1,7 @@
+use std::collections::HashSet;
 use std::f32::consts::PI;
 use std::time::Instant;
+use std::env;
 
 use pge::*;
 use pge::physics::PhysicsWorld;
@@ -82,7 +84,7 @@ impl Orc {
 		let player_node = state.nodes.get_mut(&self.node).unwrap();
 		player_node.looking_at(translation.x, translation.y, translation.z);
 		let dir = translation - player_node.translation;
-		player_node.translation += dir.normalize() * 0.01;
+		player_node.translation += dir.normalize_or_zero() * 0.01;
 	}
 }
 
@@ -115,6 +117,12 @@ pub struct FpsShooter {
 	move_force: Vec3,
 	recoil_force: Vec3,
 	bullets: Vec<Bullet>,
+	world_bounds: f32,
+	hit_log: HashSet<(ArenaId<Node>, ArenaId<Node>)>,
+	autoplay: bool,
+	autoplay_next_pick: Instant,
+	floor_id: Option<ArenaId<Node>>,
+	player_floor_violation_frames: u32,
 }
 
 impl FpsShooter {
@@ -145,6 +153,12 @@ impl FpsShooter {
 			move_force: Vec3::ZERO,
 			recoil_force: Vec3::ZERO,
 			bullets: Vec::new(),
+			world_bounds: 0.0,
+			hit_log: HashSet::new(),
+			autoplay: false,
+			autoplay_next_pick: Instant::now(),
+			floor_id: None,
+			player_floor_violation_frames: 0,
 		}
 	}
 }
@@ -322,6 +336,8 @@ impl FpsShooter {
 
 impl pge::App for FpsShooter {
 	fn on_create(&mut self, state: &mut State) {
+		self.autoplay = matches!(env::var("AUTOPLAY").as_deref(), Ok("1"));
+
 		let scene = Scene::new();
 		let main_scene_id = state.scenes.insert(scene);
 		self.main_scene = Some(main_scene_id);
@@ -388,6 +404,7 @@ impl pge::App for FpsShooter {
 		let plane_mesh = state.meshes.insert(plane_mesh);
 
 		let plane_size = 1000.0;
+		self.world_bounds = plane_size * 0.5;
 
 		let mut light_node = Node::new();
 		light_node.name = Some("Light".to_string());
@@ -408,6 +425,7 @@ impl pge::App for FpsShooter {
 		plane_node.collision_shape = Some(CollisionShape::new(glam::Vec3::new(plane_size, 0.1, plane_size)));
 		plane_node.parent = NodeParent::Scene(main_scene_id);
 		let plane_node_id = state.nodes.insert(plane_node);
+		self.floor_id = Some(plane_node_id);
 
 		let mut player = Node::new();
 		player.name = Some("Player".to_string());
@@ -589,8 +607,147 @@ impl pge::App for FpsShooter {
 	fn on_process(&mut self, state: &mut State, delta: f32) {
 		self.physics.process(state, delta);
 
+		if let (Some(player_id), Some(floor_id)) = (self.player_id, self.floor_id) {
+			let player = state.nodes.get(&player_id);
+			let floor = state.nodes.get(&floor_id);
+			if let (Some(player), Some(floor)) = (player, floor) {
+				let player_half_y = player
+					.collision_shape
+					.as_ref()
+					.map(|shape| shape.aabb(player.translation).max[1] - player.translation.y)
+					.unwrap_or(0.0);
+				let floor_half_y = floor
+					.collision_shape
+					.as_ref()
+					.map(|shape| floor.translation.y - shape.aabb(floor.translation).min[1])
+					.unwrap_or(0.0);
+				let floor_min_y = floor.translation.y - floor_half_y;
+				let player_min_y = player.translation.y - player_half_y;
+				let allowed_penetration = player_half_y * 0.25;
+				let touching_floor = player
+					.contacts
+					.iter()
+					.any(|contact| contact.node_id == floor_id);
+				if player_min_y < floor_min_y {
+					if let Some(player) = state.nodes.get_mut(&player_id) {
+						let correction = floor_min_y - player_min_y;
+						player.translation.y += correction;
+						player.physics.velocity.y = 0.0;
+					}
+					self.player_floor_violation_frames = 0;
+				} else if player_min_y < floor_min_y - allowed_penetration && !touching_floor {
+					self.player_floor_violation_frames += 1;
+					if self.player_floor_violation_frames > 10 {
+						panic!(
+							"Player fell through floor: player_id={:?}, y_min={:.3}, floor_min={:.3}, allowed={:.3}, frames={}",
+							player_id,
+							player_min_y,
+							floor_min_y,
+							allowed_penetration,
+							self.player_floor_violation_frames
+						);
+					}
+				} else {
+					self.player_floor_violation_frames = 0;
+				}
+			}
+		}
+
+		if self.autoplay {
+			self.shooting = true;
+			let player_id = match self.player_id {
+				Some(id) => id,
+				None => return,
+			};
+			let player_pos = match state.nodes.get(&player_id) {
+				Some(node) => node.translation,
+				None => return,
+			};
+			if self.autoplay_next_pick.elapsed().as_secs_f32() > 0.5 {
+				let mut candidates = Vec::new();
+				for orc in &self.orcs {
+					let node = match state.nodes.get(&orc.node) {
+						Some(node) => node,
+						None => continue,
+					};
+					let dist = node.translation.distance(player_pos);
+					if dist < 50.0 {
+						candidates.push(orc.node);
+					}
+				}
+				if !candidates.is_empty() {
+					let idx = self.rng.gen_range(0..candidates.len());
+					let target_id = candidates[idx];
+					let target_pos = match state.nodes.get(&target_id) {
+						Some(target) => target.translation,
+						None => return,
+					};
+					if let Some(player) = state.nodes.get_mut(&player_id) {
+						player.looking_at(target_pos.x, target_pos.y, target_pos.z);
+					}
+				}
+				self.autoplay_next_pick = Instant::now();
+			}
+		}
+
+		let bullet_ids: HashSet<ArenaId<Node>> = self.bullets.iter().map(|b| b.node_id).collect();
+		self.hit_log.retain(|(_, bullet_id)| bullet_ids.contains(bullet_id));
+		for orc in &self.orcs {
+			let node = match state.nodes.get(&orc.node) {
+				Some(node) => node,
+				None => continue,
+			};
+			for contact in &node.contacts {
+				if bullet_ids.contains(&contact.node_id) {
+					let key = (orc.node, contact.node_id);
+					if self.hit_log.insert(key) {
+						pge::log2!("orc hit: orc_id={} bullet_id={}", orc.node, contact.node_id);
+					}
+				}
+			}
+		}
+
 		for orc in &mut self.orcs {
 			orc.on_process(self.player_id.unwrap(), state);
+		}
+		let bounds = self.world_bounds;
+		for orc in &self.orcs {
+			let node = match state.nodes.get(&orc.node) {
+				Some(node) => node,
+				None => continue,
+			};
+			let pos = node.translation;
+			let mut clamped = pos;
+			let mut out = false;
+			if pos.y < 0.0 {
+				clamped.y = 0.0;
+				out = true;
+			} else if pos.y > 200.0 {
+				clamped.y = 200.0;
+				out = true;
+			}
+			if pos.x.abs() > bounds {
+				clamped.x = bounds * pos.x.signum();
+				out = true;
+			}
+			if pos.z.abs() > bounds {
+				clamped.z = bounds * pos.z.signum();
+				out = true;
+			}
+			if out {
+				if let Some(node) = state.nodes.get_mut(&orc.node) {
+					node.translation = clamped;
+					node.physics.velocity = Vec3::ZERO;
+				}
+			}
+			if clamped.y < 0.0 || clamped.y > 200.0 || clamped.x.abs() > bounds || clamped.z.abs() > bounds {
+				panic!(
+					"Orc out of bounds: id={:?}, pos={:?}, bounds=±{}, y=[0,200]",
+					orc.node,
+					clamped,
+					bounds
+				);
+			}
 		}
 
 		if let Some(index) = self.light_inx {
