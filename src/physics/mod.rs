@@ -483,8 +483,10 @@ impl PhysicsSystem {
 			let mut there_is_fast_boy = false;
 			// Find the earliest collision
 			for collision in &self.broad_phase_collisions {
-				let node1 = state.nodes.get(&collision.node1).unwrap();
-				let node2 = state.nodes.get(&collision.node2).unwrap();
+				let (node1, node2) = match (state.nodes.get(&collision.node1), state.nodes.get(&collision.node2)) {
+					(Some(node1), Some(node2)) => (node1, node2),
+					_ => continue,
+				};
 
 				if node1.physics.typ == PhycisObjectType::Static && node2.physics.typ == PhycisObjectType::Static {
 					continue;
