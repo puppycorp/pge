@@ -70,7 +70,7 @@ fn calculate_impulse(node1: &Node, node2: &Node, collision: &Collision, restitut
 	let rel_velocity = node2_velocity - node1_velocity;
 	let vel_along_normal = rel_velocity.dot(collision.normal);
 
-	if vel_along_normal < 0.0 {
+	if vel_along_normal > 0.0 {
 		return Impulse::default();
 	}
 
