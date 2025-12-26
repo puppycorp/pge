@@ -12,23 +12,5 @@ PGE is game engine build with rust.
 	- cargo test --workspace
 	- cargo clippy --workspace
 - When making changes always consider if you need to update existing tests or create new ones.
-
-## ENVS
-
-When you test the program there are some envs which you can use to affect how the PGE library behaves
-
-### HEADLESS (1 | 0)
-
-It will run just without graphics and input processing. You should always use this since you cannot access graphics or input devices.
-
-### ITERATIONS (number)
-
-Limits the number of app ticks before exiting (headless and normal). Logs progress and exit stats.
-
-### DEBUG (0 | 1 | 2 | 3 | 4)
-
-- not set or 0: no logs printed
-- 1: minimal logs (FPS + select initialization/exit logs)
-- 2: standard debug logs
-- 3: detailed timing breakdowns
-- 4: verbose object dumps
+- See readme how to use the library
+- You should use HEADLESS when testing since you dont have access top graphics pipeline or input devices.
