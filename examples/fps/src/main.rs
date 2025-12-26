@@ -352,7 +352,7 @@ impl pge::App for FpsShooter {
 
 		let mut rng = rand::thread_rng();
 
-		for _ in 0..0 {
+		for _ in 0..10 {
 			let node_id = state.clone_node(orc_base_node_id);
 			let node = state.nodes.get_mut(&node_id).unwrap();
 			node.parent = NodeParent::Scene(main_scene_id);
