@@ -12,6 +12,7 @@ mod spatial_grid;
 mod debug;
 //mod texture;
 mod gltf;
+mod urdf;
 mod arena;
 mod log;
 mod hardware;
@@ -30,6 +31,7 @@ pub use glam::*;
 pub use log::*;
 pub use state::*;
 pub use gltf::load_gltf;
+pub use urdf::load_urdf;
 
 #[cfg(not(feature = "wgpu_winit"))]
 pub fn run<T>(app: T) -> anyhow::Result<()>
