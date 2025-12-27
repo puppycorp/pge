@@ -363,6 +363,7 @@ async function main() {
 
 	// --- NEW: capture all occurrence paths + transforms so we can include "unmated" parts
 	const occTfByKey = new Map<string, Mat4>();
+	const occKeys = new Set<string>();
 	const occs = asm.rootAssembly?.occurrences ?? [];
 	for (const o of occs) {
 		const p = (o.path ?? o.occurrencePath ?? o.occurrence) as string[] | undefined;
@@ -370,6 +371,9 @@ async function main() {
 		const m =
 			(o.transform?.matrix ?? o.transform?.mat4 ?? o.transform) as number[] | undefined;
 
+		if (key !== "world") {
+			occKeys.add(key);
+		}
 		if (Array.isArray(m) && m.length === 16) {
 			occTfByKey.set(key, m);
 		}
@@ -414,7 +418,9 @@ async function main() {
 	}
 
 	if (edges.length === 0) {
-		die(`No mate features found. Make sure the element is an Assembly and you used includeMateFeatures/includeMateConnectors.`);
+		console.warn(
+			"No mate features found. Exporting all occurrences as fixed to world."
+		);
 	}
 
 	// Build adjacency
@@ -437,7 +443,10 @@ async function main() {
 	}
 	if (!rootKey) {
 		// fall back to first non-world node
-		rootKey = edges.find((e) => e.aKey !== "world")?.aKey ?? edges[0].aKey;
+		rootKey = edges.find((e) => e.aKey !== "world")?.aKey ?? Array.from(occKeys)[0];
+	}
+	if (!rootKey) {
+		rootKey = "world";
 	}
 
 	// Create node infos (names first)
@@ -461,6 +470,7 @@ async function main() {
 	}
 
 	ensureNode("world");
+	for (const key of occKeys) { ensureNode(key); }
 	for (const e of edges) { ensureNode(e.aKey); ensureNode(e.bKey); }
 
 	// Spanning tree BFS from "world" if connected, else from rootKey and then attach to world

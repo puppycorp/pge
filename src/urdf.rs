@@ -9,13 +9,21 @@ use crate::{ArenaId, State};
 use crate::cube;
 
 fn resolve_mesh_path(urdf_path: &Path, mesh_filename: &str) -> Option<PathBuf> {
-	let mesh_path = Path::new(mesh_filename);
+	let mesh_path = if let Some(stripped) = mesh_filename.strip_prefix("package://") {
+		let mut parts = stripped.splitn(2, '/');
+		let _pkg = parts.next();
+		PathBuf::from(parts.next().unwrap_or(stripped))
+	} else if let Some(stripped) = mesh_filename.strip_prefix("file://") {
+		PathBuf::from(stripped)
+	} else {
+		PathBuf::from(mesh_filename)
+	};
 	if mesh_path.is_absolute() {
-		return mesh_path.exists().then(|| mesh_path.to_path_buf());
+		return mesh_path.exists().then(|| mesh_path);
 	}
 
 	let base_dir = urdf_path.parent().unwrap_or_else(|| Path::new("."));
-	let candidate = base_dir.join(mesh_path);
+	let candidate = base_dir.join(&mesh_path);
 	if candidate.exists() {
 		return Some(candidate);
 	}
