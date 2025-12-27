@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use crate::load_gltf;
+use crate::load_urdf;
 use crate::arena::*;
 use crate::types::*;
 use crate::utility::get_scene_bounding_box;
@@ -29,6 +30,10 @@ impl State {
     pub fn load_3d_model<P: AsRef<Path> + Clone>(&mut self, path: P) -> ArenaId<Model3D> {
         let model = load_gltf(path, self);
         self.models.insert(model)
+    }
+
+    pub fn load_urdf<P: AsRef<Path> + Clone>(&mut self, path: P) -> ArenaId<Scene> {
+        load_urdf(path, self)
     }
 
     /// Deep clones node and it's children

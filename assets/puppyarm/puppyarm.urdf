@@ -1,0 +1,419 @@
+<?xml version="1.0"?>
+<robot name="onshape_robot">
+  <link name="Part_1__2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__2_3.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__2_3.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="Part_1__2_2">
+    <visual>
+      <origin xyz="0 -0.0145 0.0375" rpy="3.141592654 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__2_4.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.0145 0.0375" rpy="3.141592654 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__2_4.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="Part_1__2_3">
+    <visual>
+      <origin xyz="0 -0 0" rpy="3.141592654 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__2_3.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 -0 0" rpy="3.141592654 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__2_3.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="Part_1__2_4">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__2_3.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__2_3.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="Part_1__5">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__5.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__5.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="v2__1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/v2__1.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/v2__1.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="lThEd9bq"></link>
+  <link name="Part_1__7">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__7.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__7.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="Part_1__6">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__6.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__6.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="XG_ZIJI_16__1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/XG_ZIJI_16__1.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/XG_ZIJI_16__1.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="Part_1__8">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__8.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__8.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="Part_1__3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__3.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/Part_1__3.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="9uFxmiSRso"></link>
+  <link name="v2__1_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/v2__1_2.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/v2__1_2.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="53qAbGFHhDmo"></link>
+  <link name="v2__1_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/v2__1.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/v2__1.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="servo_bolt__11">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="servo_bolt__1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="servo_bolt__2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="servo_bolt__3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="servo_bolt__4">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="servo_bolt__5">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="servo_bolt__6">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="./workdir/meshes/servo_bolt__11.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="UepIge0M1n"></link>
+  <link name="UepIge0M1n_2"></link>
+  <link name="UepIge0M1n_3"></link>
+  <joint name="joint_fixed_to_world_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="Part_1__2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <joint name="joint_unmated_Part_1__2_4_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="Part_1__2_4"/>
+    <origin xyz="-0.089139514 0.116293252 0.047820885" rpy="-1.635606731 0 0.288733561"/>
+  </joint>
+  <joint name="joint_unmated_Part_1__5_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="Part_1__5"/>
+    <origin xyz="-0.078927196 0.081912288 0.035618104" rpy="0.064810405 -0 -2.852859093"/>
+  </joint>
+  <joint name="joint_unmated_v2__1_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="v2__1"/>
+    <origin xyz="-0.0617389 -0.004225673 -0.093022559" rpy="0 0 -1.282062766"/>
+  </joint>
+  <joint name="joint_unmated_lThEd9bq_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="lThEd9bq"/>
+    <origin xyz="-0.05050372 -0.011320264 -0.113022557" rpy="-0 0 -2.852859093"/>
+  </joint>
+  <joint name="joint_unmated_Part_1__7_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="Part_1__7"/>
+    <origin xyz="-0.121598908 0.140405714 0.01400376" rpy="2.997919441 0 0.288733561"/>
+  </joint>
+  <joint name="joint_unmated_Part_1__6_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="Part_1__6"/>
+    <origin xyz="-0.097010683 0.147709255 0.01400376" rpy="-0.143673213 0 0.288733561"/>
+  </joint>
+  <joint name="joint_unmated_XG_ZIJI_16__1_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="XG_ZIJI_16__1"/>
+    <origin xyz="-0.05030765 -0.037569532 -0.122422557" rpy="1.570796327 -0 -1.563326934"/>
+  </joint>
+  <joint name="joint_unmated_Part_1__8_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="Part_1__8"/>
+    <origin xyz="-0.050498118 -0.012070243 -0.154022557" rpy="-0 0 0.007469393"/>
+  </joint>
+  <joint name="joint_unmated_Part_1__3_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="Part_1__3"/>
+    <origin xyz="-0.05050372 -0.011320264 -0.124522557" rpy="0 0 0.007469393"/>
+  </joint>
+  <joint name="joint_unmated_9uFxmiSRso_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="9uFxmiSRso"/>
+    <origin xyz="-0.05050372 -0.011320264 -0.121522557" rpy="0 0 -2.852859093"/>
+  </joint>
+  <joint name="joint_unmated_v2__1_2_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="v2__1_2"/>
+    <origin xyz="-0.090922001 -0.017483203 0.056110812" rpy="0 0.064810405 1.859529888"/>
+  </joint>
+  <joint name="joint_unmated_53qAbGFHhDmo_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="53qAbGFHhDmo"/>
+    <origin xyz="-0.05050372 -0.011320264 -0.121522557" rpy="0 0 0.007469393"/>
+  </joint>
+  <joint name="joint_unmated_v2__1_3_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="v2__1_3"/>
+    <origin xyz="-0.110240078 0.158883606 0.044242259" rpy="-0 -0.143673213 -1.282062766"/>
+  </joint>
+  <joint name="joint_unmated_servo_bolt__11_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="servo_bolt__11"/>
+    <origin xyz="-0.077787927 -0.002699081 0.062448464" rpy="-1.570796327 1.505985922 -1.282062766"/>
+  </joint>
+  <joint name="joint_unmated_servo_bolt__1_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="servo_bolt__1"/>
+    <origin xyz="-0.033212783 0.010541256 0.062448464" rpy="1.570796327 1.505985922 -1.282062766"/>
+  </joint>
+  <joint name="joint_unmated_servo_bolt__2_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="servo_bolt__2"/>
+    <origin xyz="-0.027660886 -0.01183744 -0.093022557" rpy="-0.072894217 -1.570796327 -1.979591219"/>
+  </joint>
+  <joint name="joint_unmated_servo_bolt__3_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="servo_bolt__3"/>
+    <origin xyz="-0.07031882 -0.0245083 -0.093022557" rpy="-0.873267873 -1.570796327 -1.978115202"/>
+  </joint>
+  <joint name="joint_unmated_servo_bolt__4_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="servo_bolt__4"/>
+    <origin xyz="-0.048510551 -0.018030501 -0.109522557" rpy="-3.141592654 -0 0.288733561"/>
+  </joint>
+  <joint name="joint_unmated_servo_bolt__5_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="servo_bolt__5"/>
+    <origin xyz="-0.079198599 0.165006682 0.044671799" rpy="1.570796327 1.427123114 -1.282062766"/>
+  </joint>
+  <joint name="joint_unmated_servo_bolt__6_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="servo_bolt__6"/>
+    <origin xyz="-0.122335835 0.152193452 0.044671799" rpy="-1.570796327 1.427123114 -1.282062766"/>
+  </joint>
+  <joint name="joint_unmated_UepIge0M1n_3_FASTENED" type="fixed">
+    <parent link="world"/>
+    <child link="UepIge0M1n_3"/>
+    <origin xyz="-0.083209132 0.130043078 0.047325562" rpy="-0 -0.064810405 -1.282062766"/>
+  </joint>
+  <joint name="joint_Fastened_1_FASTENED" type="fixed">
+    <parent link="Part_1__2"/>
+    <child link="Part_1__2_2"/>
+    <origin xyz="-0 -0 0" rpy="3.141592654 0 0"/>
+  </joint>
+  <joint name="joint_Fastened_25_FASTENED" type="fixed">
+    <parent link="Part_1__2"/>
+    <child link="UepIge0M1n"/>
+    <origin xyz="0.008 -0.0105 -0.016" rpy="1.570796327 -1.570796327 -1.570796327"/>
+  </joint>
+  <joint name="joint_Fastened_3_FASTENED" type="fixed">
+    <parent link="Part_1__2_2"/>
+    <child link="Part_1__2_3"/>
+    <origin xyz="0 0 0.075" rpy="3.141592654 0 0"/>
+  </joint>
+  <joint name="joint_Fastened_26_FASTENED" type="fixed">
+    <parent link="Part_1__2_3"/>
+    <child link="UepIge0M1n_2"/>
+    <origin xyz="-0.0105 0.029 0.016" rpy="1.570796327 1.570796327 3.141592654"/>
+  </joint>
+</robot>

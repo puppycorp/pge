@@ -50,6 +50,18 @@ impl log::Log for SimpleLogger {
         match debug_level() {
             0 => false,
             1 => metadata.level() <= Level::Info,
+            2 => {
+                if metadata.level() > Level::Debug {
+                    return false;
+                }
+                if metadata.level() == Level::Debug {
+                    let target = metadata.target();
+                    if target.starts_with("wgpu") {
+                        return false;
+                    }
+                }
+                true
+            }
             _ => metadata.level() <= Level::Trace,
         }
     }
@@ -77,6 +89,7 @@ pub fn init_logging() {
     let level = match debug_level() {
         0 => log::LevelFilter::Off,
         1 => log::LevelFilter::Info,
+        2 => log::LevelFilter::Debug,
         _ => log::LevelFilter::Trace,
     };
     log::set_logger(&LOGGER)

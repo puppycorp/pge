@@ -10,6 +10,9 @@ struct SceneViewer {
 	window_id: ArenaId<Window>,
 	scene_id: ArenaId<Scene>,
 	camera_node_id: ArenaId<Node>,
+	orbit_center: Vec3,
+	right_button_down: bool,
+	last_cursor_offset: Option<Vec2>,
 }
 
 impl SceneViewer {
@@ -61,29 +64,63 @@ impl SceneViewer {
 
 		let window = Window::new().title(&name).ui(ui_id);
 		let window_id = state.windows.insert(window);
-		Self { window_id, scene_id, camera_node_id }
+		Self {
+			window_id,
+			scene_id,
+			camera_node_id,
+			orbit_center: center,
+			right_button_down: false,
+			last_cursor_offset: None,
+		}
 	}
 
 	fn on_mouse_input(&mut self, event: MouseEvent, state: &mut State) {
 		match event {
 			MouseEvent::Moved { dx, dy } => {
-				let sensitivity = 0.005;
-				let rotation_x = Quat::from_axis_angle(Vec3::Y, -dx * sensitivity);
-				let rotation_y = Quat::from_axis_angle(Vec3::X, -dy * sensitivity);
-				let rotation = rotation_y * rotation_x;
-
-				/*for node_id in &self.camera_nodes {
-					if let Some(node) = state.nodes.get_mut(node_id) {
-						node.rotation = rotation * node.rotation;
+				let current_offset = Vec2::new(dx, dy);
+				if self.right_button_down {
+					if let Some(prev_offset) = self.last_cursor_offset {
+						let delta = current_offset - prev_offset;
+						let sensitivity = 0.005;
+						let yaw = Quat::from_axis_angle(Vec3::Y, -delta.x * sensitivity);
+						let camera_node = state.nodes.get_mut(&self.camera_node_id).unwrap();
+						let mut offset = camera_node.translation - self.orbit_center;
+						let forward = (-offset).normalize_or_zero();
+						let mut right = forward.cross(Vec3::Y).normalize_or_zero();
+						if right.length_squared() == 0.0 {
+							right = Vec3::X;
+						}
+						let pitch = Quat::from_axis_angle(right, -delta.y * sensitivity);
+						offset = (yaw * pitch) * offset;
+						camera_node.translation = self.orbit_center + offset;
+						camera_node.looking_at(
+							self.orbit_center.x,
+							self.orbit_center.y,
+							self.orbit_center.z,
+						);
 					}
-				}*/
+					self.last_cursor_offset = Some(current_offset);
+				} else {
+					self.last_cursor_offset = Some(current_offset);
+				}
 			},
+			MouseEvent::Pressed { button } => {
+				if let MouseButton::Right = button {
+					self.right_button_down = true;
+					self.last_cursor_offset = None;
+				}
+			}
+			MouseEvent::Released { button } => {
+				if let MouseButton::Right = button {
+					self.right_button_down = false;
+					self.last_cursor_offset = None;
+				}
+			}
 			MouseEvent::Wheel { dx, dy } => {
 				log::info!("scroll delta: {:?}", (dx, dy));
 				let camera_node = state.nodes.get_mut(&self.camera_node_id).unwrap();
 				camera_node.translation += Vec3::new(0.0, 0.0, dy * 0.005);
 			}
-			_ => {}
 		}
 	}
 }
