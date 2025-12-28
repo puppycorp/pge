@@ -102,10 +102,10 @@ fn vec3_from_urdf(v: &Vec3) -> glam::Vec3 {
 
 fn quat_from_rpy(rpy: &Vec3) -> glam::Quat {
 	glam::Quat::from_euler(
-		glam::EulerRot::XYZ,
-		rpy[0] as f32,
-		rpy[1] as f32,
+		glam::EulerRot::ZYX,
 		rpy[2] as f32,
+		rpy[1] as f32,
+		rpy[0] as f32,
 	)
 }
 
@@ -180,6 +180,9 @@ pub fn load_urdf<P: AsRef<Path>>(p: P, state: &mut State) -> ArenaId<Scene> {
 				collision_shape_from_geometry(&visual.geometry, &visual.origin);
 		}
 
+		let node_id = state.nodes.insert(node);
+		link_nodes.insert(link.name.clone(), node_id);
+
 		let mut mesh_id: Option<ArenaId<Mesh>> = None;
 		let mut mesh_scale: Option<glam::Vec3> = None;
 		if let Some(visual) = link.visual.first() {
@@ -215,22 +218,36 @@ pub fn load_urdf<P: AsRef<Path>>(p: P, state: &mut State) -> ArenaId<Scene> {
 			}
 		}
 		if let Some(mesh_id) = mesh_id {
-			node.mesh = Some(mesh_id);
-			if let Some(scale) = mesh_scale {
-				node.scale = scale;
+			let mut visual_node = Node::new();
+			visual_node.name = Some(format!("{}_visual", link.name));
+			visual_node.parent = NodeParent::Node(node_id);
+			if let Some(visual) = link.visual.first() {
+				let (translation, rotation) = origin_offsets(&visual.origin);
+				visual_node.translation = translation;
+				visual_node.rotation = rotation;
 			}
-		} else if let Some(shape) = &node.collision_shape {
+			visual_node.mesh = Some(mesh_id);
+			if let Some(scale) = mesh_scale {
+				visual_node.scale = scale;
+			}
+			state.nodes.insert(visual_node);
+		} else if let Some(shape) = &state.nodes.get(&node_id).unwrap().collision_shape {
+			let mut visual_node = Node::new();
+			visual_node.name = Some(format!("{}_visual", link.name));
+			visual_node.parent = NodeParent::Node(node_id);
 			let aabb = shape.aabb(glam::Vec3::ZERO);
 			let size = aabb.max - aabb.min;
-			node.mesh = Some(unit_cube);
-			node.scale = size;
+			visual_node.mesh = Some(unit_cube);
+			visual_node.scale = size;
+			state.nodes.insert(visual_node);
 		} else {
-			node.mesh = Some(unit_cube);
-			node.scale = glam::Vec3::splat(0.05);
+			let mut visual_node = Node::new();
+			visual_node.name = Some(format!("{}_visual", link.name));
+			visual_node.parent = NodeParent::Node(node_id);
+			visual_node.mesh = Some(unit_cube);
+			visual_node.scale = glam::Vec3::splat(0.05);
+			state.nodes.insert(visual_node);
 		}
-
-		let node_id = state.nodes.insert(node);
-		link_nodes.insert(link.name.clone(), node_id);
 	}
 
 	let mut child_links = HashSet::new();
