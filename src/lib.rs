@@ -24,6 +24,7 @@ mod collision_detection;
 pub mod utility;
 pub mod orbit;
 pub mod text;
+pub mod editor;
 pub use types::*;
 pub use shapes::*;
 pub use gui::*;
@@ -34,6 +35,7 @@ pub use log::*;
 pub use state::*;
 pub use gltf::load_gltf;
 pub use urdf::load_urdf;
+pub use editor::{EditorApp, EditorPlugin, EditorSettings, with_editor};
 
 #[cfg(not(feature = "wgpu_winit"))]
 pub fn run<T>(app: T) -> anyhow::Result<()>
