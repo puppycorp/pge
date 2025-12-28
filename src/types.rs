@@ -515,6 +515,11 @@ impl Node {
 		let rotation = glam::Quat::from_euler(glam::EulerRot::XYZ, dy, dx, 0.0);
 		self.rotation = rotation * self.rotation;
     }
+    
+    pub fn rotate_z(&mut self, angle: f32) {
+		let rotation = glam::Quat::from_rotation_z(angle);
+		self.rotation = rotation * self.rotation;
+    }
 
     pub fn scale(&mut self, x: f32, y: f32, z: f32) {
         self.scale = glam::Vec3::new(x, y, z);

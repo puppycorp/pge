@@ -16,7 +16,7 @@ struct PuppyArmExample {
 
 impl pge::App for PuppyArmExample {
 	fn on_create(&mut self, state: &mut pge::State) {
-		self.orbit_controller.rot_speed = 0.0005;
+		self.orbit_controller.rot_speed = 0.01;
 
 		let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 			.join("../../assets/puppyarm/puppyarm.urdf");

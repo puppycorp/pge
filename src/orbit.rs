@@ -26,8 +26,7 @@ pub fn orbit_state_from_offset(offset: Vec3) -> (f32, f32, f32) {
 #[derive(Debug, Clone)]
 pub struct OrbitController {
 	pub target: Vec3,
-	pub yaw: f32,
-	pub pitch: f32,
+	pub rotation: Quat,
 	pub distance: f32,
 	pub rot_speed: f32,
 	pub pan_speed: f32,
@@ -43,10 +42,9 @@ impl Default for OrbitController {
 	fn default() -> Self {
 		Self {
 			target: Vec3::ZERO,
-			yaw: 0.0,
-			pitch: 0.0,
+			rotation: Quat::IDENTITY,
 			distance: 3.0,
-			rot_speed: 0.005,
+			rot_speed: 0.01,
 			pan_speed: 0.002,
 			zoom_speed: 0.12,
 			min_dist: 0.05,
@@ -60,12 +58,23 @@ impl Default for OrbitController {
 
 impl OrbitController {
 	pub fn set_from_target_and_position(&mut self, target: Vec3, position: Vec3) {
-		let offset = position - target;
-		let (yaw, pitch, distance) = orbit_state_from_offset(offset);
 		self.target = target;
-		self.yaw = yaw;
-		self.pitch = pitch;
-		self.distance = distance;
+		let offset = position - target;
+		self.distance = offset.length().max(self.min_dist);
+
+		let forward = (target - position).normalize_or_zero();
+		let world_up = Vec3::Y;
+
+		let mut right = world_up.cross(forward);
+		if right.length_squared() < 1e-8 {
+			right = Vec3::X;
+		} else {
+			right = right.normalize();
+		}
+		let up = forward.cross(right).normalize_or_zero();
+
+		let m = Mat3::from_cols(right, up, forward);
+		self.rotation = Quat::from_mat3(&m).normalize();
 	}
 
 	pub fn orbit(&mut self, mouse_delta: Vec2) {
@@ -82,21 +91,23 @@ impl OrbitController {
 
 	pub fn process(&mut self, state: &mut State, camera_node_id: ArenaId<Node>, _dt: f32) {
 		if self.orbit_delta != Vec2::ZERO {
-			self.yaw += self.orbit_delta.x * self.rot_speed;
-			self.pitch += self.orbit_delta.y * self.rot_speed;
-			let limit = std::f32::consts::FRAC_PI_2 - 0.001;
-			self.pitch = self.pitch.clamp(-limit, limit);
-			crate::log2!(
-				"Orbit: yaw {:.3} pitch {:.3} delta {:?}",
-				self.yaw,
-				self.pitch,
-				self.orbit_delta
-			);
+			let yaw_delta = self.orbit_delta.x * self.rot_speed;
+			let pitch_delta = self.orbit_delta.y * self.rot_speed;
+
+			let right = (self.rotation * Vec3::X).normalize_or_zero();
+			let up = (self.rotation * Vec3::Y).normalize_or_zero();
+
+			let q_yaw = Quat::from_axis_angle(up, yaw_delta);
+			let q_pitch = Quat::from_axis_angle(right, pitch_delta);
+			self.rotation = (q_pitch * q_yaw * self.rotation).normalize();
+
+			crate::log2!("Orbit: delta {:?}", self.orbit_delta);
 			self.orbit_delta = Vec2::ZERO;
 		}
 
 		if self.pan_delta != Vec2::ZERO {
-			let (right, up, _) = self.basis();
+			let right = self.rotation * Vec3::X;
+			let up = self.rotation * Vec3::Y;
 			let scale = self.pan_speed * self.distance;
 			self.target += (-self.pan_delta.x * right + self.pan_delta.y * up) * scale;
 			crate::log2!("Pan: target {:?} delta {:?}", self.target, self.pan_delta);
@@ -110,12 +121,13 @@ impl OrbitController {
 			self.zoom_delta = 0.0;
 		}
 
-		let offset = orbit_offset(self.yaw, self.pitch, self.distance);
+		let forward = (self.rotation * Vec3::Z).normalize_or_zero();
+		let offset = -forward * self.distance;
 		if let Some(camera_node) = state.nodes.get_mut(&camera_node_id) {
 			let prev_translation = camera_node.translation;
 			let prev_rotation = camera_node.rotation;
 			camera_node.translation = self.target + offset;
-			camera_node.rotation = orbit_rotation(self.yaw, self.pitch);
+			camera_node.rotation = self.rotation;
 			if prev_translation != camera_node.translation {
 				crate::log2!(
 					"Node translation: {:?} -> {:?}",
@@ -134,8 +146,9 @@ impl OrbitController {
 	}
 
 	fn basis(&self) -> (Vec3, Vec3, Vec3) {
-		let forward = (-orbit_offset(self.yaw, self.pitch, self.distance)).normalize_or_zero();
-		let (right, up) = orbit_axes(self.yaw, forward);
+		let forward = (self.rotation * Vec3::Z).normalize_or_zero();
+		let right = (self.rotation * Vec3::X).normalize_or_zero();
+		let up = forward.cross(right).normalize_or_zero();
 		(right, up, forward)
 	}
 }
@@ -202,14 +215,13 @@ mod tests {
 		let camera_node_id = state.nodes.insert(Node::default());
 		let mut controller = OrbitController::default();
 		controller.target = Vec3::new(1.0, 2.0, 3.0);
-		controller.yaw = 0.7;
-		controller.pitch = -0.2;
 		controller.distance = 4.0;
+		controller.rotation = orbit_rotation(0.7, -0.2);
 
 		controller.process(&mut state, camera_node_id, 0.0);
 
 		let camera_node = state.nodes.get(&camera_node_id).unwrap();
-		let expected_pos = controller.target + orbit_offset(controller.yaw, controller.pitch, controller.distance);
+		let expected_pos = controller.target - (controller.rotation * Vec3::Z) * controller.distance;
 		assert_vec3_approx_eq(camera_node.translation, expected_pos, 1e-4);
 
 		let expected_forward = (controller.target - camera_node.translation).normalize_or_zero();

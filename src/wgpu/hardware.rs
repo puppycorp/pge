@@ -83,6 +83,7 @@ struct WindowContext<'a> {
 	window_id: u32,
 	surface: Arc<wgpu::Surface<'a>>,
 	lock_cursor: bool,
+	last_cursor_pos: Option<PhysicalPosition<f64>>,
 }
 
 struct PipelineContext {
@@ -177,6 +178,7 @@ where
 					window_id: args.window_id,
 					wininit_window,
 					lock_cursor: args.lock_cursor,
+					last_cursor_pos: None,
 				};
 				self.windows.push(window_ctx);
 			}
@@ -685,21 +687,33 @@ where
 				let size = &window_ctx.wininit_window.inner_size();
 				let middle_x = size.width as f64 / 2.0;
 				let middle_y = size.height as f64 / 2.0;
-				let dx = position.x - middle_x;
-				let dy = position.y - middle_y;
-				let dx = dx as f32;
-				let dy = dy as f32;
-				let event = MouseEvent::Moved {
-					dx,
-					dy,
-				};
-				self.engine.on_mouse_input(WindowHandle {id: window_ctx.window_id, }, event);
 				if window_ctx.lock_cursor {
+					let dx = (position.x - middle_x) as f32;
+					let dy = (position.y - middle_y) as f32;
+					if dx != 0.0 || dy != 0.0 {
+						self.engine.on_mouse_input(
+							WindowHandle { id: window_ctx.window_id },
+							MouseEvent::Moved { dx, dy },
+						);
+					}
 					window_ctx
 						.wininit_window
 						.set_cursor_position(PhysicalPosition::new(middle_x, middle_y))
 						.unwrap();
 					window_ctx.wininit_window.set_cursor_visible(false);
+					window_ctx.last_cursor_pos = Some(PhysicalPosition::new(middle_x, middle_y));
+				} else if let Some(prev) = window_ctx.last_cursor_pos {
+					let dx = (position.x - prev.x) as f32;
+					let dy = (position.y - prev.y) as f32;
+					if dx != 0.0 || dy != 0.0 {
+						self.engine.on_mouse_input(
+							WindowHandle { id: window_ctx.window_id },
+							MouseEvent::Moved { dx, dy },
+						);
+					}
+					window_ctx.last_cursor_pos = Some(position);
+				} else {
+					window_ctx.last_cursor_pos = Some(position);
 				}
 			}
 			WindowEvent::MouseInput {
