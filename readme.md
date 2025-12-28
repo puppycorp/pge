@@ -21,3 +21,11 @@ Limits the number of app ticks before exiting (headless and normal). Logs progre
 - 2: standard debug logs
 - 3: detailed timing breakdowns
 - 4: verbose object dumps
+
+### SCREENSHOT (1 | 0)
+
+When set to 1, saves rendered frames to `./workdir/screenshots` as PNG files. Works in normal mode and in headless offscreen mode.
+
+### SCREENSHOT_INTERVAL (number)
+
+When SCREENSHOT is 1, save a frame every N renders (default 1).

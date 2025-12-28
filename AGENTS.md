@@ -27,3 +27,4 @@ which should run without crashing.
 when you are testing the code you can use the DEBUG env to modify 
 how much is logged see readme for descriptions. Also if you 
 can temporarily add logging if you think that is nessesary for testing.
+Agents can also use SCREENSHOT=1 to save rendered frames to ./workdir/screenshots for debugging. Use SCREENSHOT_INTERVAL to control how often frames are saved.
