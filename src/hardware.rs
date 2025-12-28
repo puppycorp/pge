@@ -13,6 +13,7 @@ pub trait Hardware {
     fn create_window(&mut self, window: &Window) -> WindowHandle { unimplemented!() }
     fn destroy_window(&mut self, handle: WindowHandle) { unimplemented!() }
 	fn write_buffer(&mut self, buffer: BufferHandle, data: &[u8]) { unimplemented!() }
+	fn save_screenshot(&mut self, window: WindowHandle, path: &str) { unimplemented!() }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

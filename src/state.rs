@@ -24,6 +24,7 @@ pub struct State {
     pub materials: Arena<Material>,
     pub joints: Arena<Joint>,
     pub keyboard: Option<Keyboard>,
+	pub screenshot_request: Option<(ArenaId<Window>, String)>,
 }
 
 impl State {

@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
 use std::thread::sleep;
@@ -74,7 +77,11 @@ enum UserEvent{
 	Render {
 		window: WindowHandle,
 		encoder: RenderEncoder,
-	}
+	},
+	SaveScreenshot {
+		window: WindowHandle,
+		path: String,
+	},
 }
 
 struct WindowContext<'a> {
@@ -84,6 +91,7 @@ struct WindowContext<'a> {
 	surface: Arc<wgpu::Surface<'a>>,
 	lock_cursor: bool,
 	last_cursor_pos: Option<PhysicalPosition<f64>>,
+	surface_format: Option<wgpu::TextureFormat>,
 }
 
 struct PipelineContext {
@@ -107,6 +115,9 @@ struct PgeWininitHandler<'a, A, H> {
 	pipelines: Vec<PipelineContext>,
 	buffers: Vec<BufferContext>,
 	textures: Vec<TextureContext>,
+	pending_screenshots: HashMap<u32, String>,
+	screenshot_dir: Option<PathBuf>,
+	screenshot_counter: u64,
 }
 
 impl<'a, A, H> PgeWininitHandler<'a, A, H> {
@@ -114,6 +125,22 @@ impl<'a, A, H> PgeWininitHandler<'a, A, H> {
 		let progress_interval = max_iterations
 			.map(iteration_log_interval)
 			.unwrap_or(0);
+		let screenshot_dir = match env::var("SCREENSHOT").as_deref() {
+			Ok("1") => {
+				let dir = match env::current_dir() {
+					Ok(dir) => dir.join("workdir").join("screenshots"),
+					Err(err) => {
+						log::error!("Failed to read current dir for screenshots: {:?}", err);
+						PathBuf::from("screenshots")
+					}
+				};
+				if let Err(err) = fs::create_dir_all(&dir) {
+					log::error!("Failed to create screenshot directory {:?}: {:?}", dir, err);
+				}
+				Some(dir)
+			}
+			_ => None,
+		};
 		Self {
 			engine,
 			start_time: Instant::now(),
@@ -129,6 +156,9 @@ impl<'a, A, H> PgeWininitHandler<'a, A, H> {
 			pipelines: Vec::new(),
 			buffers: Vec::new(),
 			textures: Vec::new(),
+			pending_screenshots: HashMap::new(),
+			screenshot_dir,
+			screenshot_counter: 0,
 		}
 	}
 
@@ -179,6 +209,7 @@ where
 					wininit_window,
 					lock_cursor: args.lock_cursor,
 					last_cursor_pos: None,
+					surface_format: None,
 				};
 				self.windows.push(window_ctx);
 			}
@@ -192,7 +223,7 @@ where
 				name,
 				pipeline_id,
 			} => {
-				let window_ctx = match self.windows.iter().find(|w| w.window_id == window.id) {
+				let window_ctx = match self.windows.iter_mut().find(|w| w.window_id == window.id) {
 					Some(window) => window,
 					None => {
 						log::error!("Window not found: {:?}", window);
@@ -206,11 +237,12 @@ where
 					.copied()
 					.find(|f| f.is_srgb())
 					.unwrap_or(surface_caps.formats[0]);
+				window_ctx.surface_format = Some(surface_format);
 
 				let size = window_ctx.wininit_window.inner_size();
 		
 				let config = wgpu::SurfaceConfiguration {
-					usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+					usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
 					format: surface_format,
 					width: size.width,
 					height: size.height,
@@ -352,21 +384,33 @@ where
 				window,
 				encoder,
 			} => {
-				let window_ctx = match self.windows.iter().find(|window| window.window_id == window.window_id) {
-					Some(window) => window,
+				let mut screenshot_path = self.pending_screenshots.remove(&window.id);
+				if screenshot_path.is_none() {
+					if let Some(dir) = &self.screenshot_dir {
+						let filename = format!("screenshot_{}_{}.png", window.id, self.screenshot_counter);
+						self.screenshot_counter += 1;
+						let path = dir.join(filename);
+						screenshot_path = Some(path.to_string_lossy().to_string());
+					}
+				}
+				let window_index = match self.windows.iter().position(|ctx| ctx.window_id == window.id) {
+					Some(index) => index,
 					None => {
 						log::error!("Window not found: {:?} => RETURN", window);
 						return;
 					}
 				};
+				let window_ctx = &self.windows[window_index];
 				let output = window_ctx.surface.get_current_texture().unwrap();
 				let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 				let mut wgpu_encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
 					label: Some("Render Encoder"),
 				});
+				let mut screenshot_buffer = None;
+				let mut screenshot_info = None;
 				for pass in encoder.passes {
 					let pipeline = pass.pipeline.unwrap();
-					let pipeline_ctx = match self.pipelines.iter().find(|pipeline| pipeline.id == pipeline.id) {
+					let pipeline_ctx = match self.pipelines.iter().find(|pipeline_ctx| pipeline_ctx.id == pipeline.id) {
 						Some(pipeline) => pipeline,
 						None => {
 							log::error!("Pipeline not found: {:?} => RETURN", pipeline);
@@ -466,8 +510,94 @@ where
 						wgpu_pass.draw_indexed(indices.clone(), 0, instances.clone());
 					}
 				}
+				if screenshot_path.is_some() {
+					let size = window_ctx.wininit_window.inner_size();
+					let bytes_per_pixel = 4;
+					let unpadded_bytes_per_row = size.width * bytes_per_pixel;
+					let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+					let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
+					let padded_bytes_per_row = unpadded_bytes_per_row + padded_bytes_per_row_padding;
+					let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+						label: Some("Screenshot Buffer"),
+						size: padded_bytes_per_row as u64 * size.height as u64,
+						usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+						mapped_at_creation: false,
+					});
+					let texture_size = wgpu::Extent3d {
+						width: size.width,
+						height: size.height,
+						depth_or_array_layers: 1,
+					};
+					wgpu_encoder.copy_texture_to_buffer(
+						wgpu::ImageCopyTexture {
+							texture: &output.texture,
+							mip_level: 0,
+							origin: wgpu::Origin3d::ZERO,
+							aspect: wgpu::TextureAspect::All,
+						},
+						wgpu::ImageCopyBuffer {
+							buffer: &output_buffer,
+							layout: wgpu::ImageDataLayout {
+								offset: 0,
+								bytes_per_row: Some(padded_bytes_per_row),
+								rows_per_image: Some(size.height),
+							},
+						},
+						texture_size,
+					);
+					screenshot_buffer = Some(output_buffer);
+					screenshot_info = Some((size.width, size.height, unpadded_bytes_per_row, padded_bytes_per_row));
+				}
 				self.queue.submit(std::iter::once(wgpu_encoder.finish()));
 				output.present();
+				if let (Some(path), Some(buffer), Some((width, height, unpadded_bytes_per_row, padded_bytes_per_row))) =
+					(screenshot_path, screenshot_buffer, screenshot_info)
+				{
+					let buffer_slice = buffer.slice(..);
+					let (tx, rx) = std::sync::mpsc::channel();
+					buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+						let _ = tx.send(result);
+					});
+					self.device.poll(wgpu::Maintain::Wait);
+					match rx.recv() {
+						Ok(Ok(())) => {}
+						Ok(Err(err)) => {
+							log::error!("Failed to map screenshot buffer: {:?}", err);
+							buffer.unmap();
+							return;
+						}
+						Err(err) => {
+							log::error!("Failed to receive screenshot buffer map result: {:?}", err);
+							buffer.unmap();
+							return;
+						}
+					}
+					let data = buffer_slice.get_mapped_range();
+					let mut pixels: Vec<u8> = Vec::with_capacity((width * height * 4) as usize);
+					for chunk in data.chunks(padded_bytes_per_row as usize) {
+						pixels.extend_from_slice(&chunk[..unpadded_bytes_per_row as usize]);
+					}
+					drop(data);
+					buffer.unmap();
+					if matches!(
+						window_ctx.surface_format,
+						Some(wgpu::TextureFormat::Bgra8Unorm) | Some(wgpu::TextureFormat::Bgra8UnormSrgb)
+					) {
+						for chunk in pixels.chunks_exact_mut(4) {
+							chunk.swap(0, 2);
+						}
+					}
+					match image::save_buffer(
+						&path,
+						&pixels,
+						width,
+						height,
+						image::ColorType::Rgba8,
+					) {
+						Ok(_) => crate::log1!("Screenshot saved to {}", path),
+						Err(err) => log::error!("Failed to save screenshot: {:?}", err),
+					}
+				}
 			},
 			UserEvent::CreateBuffer {
 				buffer_id,
@@ -614,6 +744,12 @@ where
 				}
 				buffer_ctx.written = true;
 				self.queue.write_buffer(&buffer_ctx.buffer, 0, &data);
+			}
+			UserEvent::SaveScreenshot {
+				window,
+				path,
+			} => {
+				self.pending_screenshots.insert(window.id, path);
 			}
 		}
 	}
@@ -1076,6 +1212,13 @@ impl Hardware for WgpuHardware {
 		self.proxy.send_event(UserEvent::Render {
 			window,
 			encoder,
+		});
+	}
+
+	fn save_screenshot(&mut self, window: WindowHandle, path: &str) {
+		self.proxy.send_event(UserEvent::SaveScreenshot {
+			window,
+			path: path.to_string(),
 		});
 	}
 }

@@ -51,4 +51,8 @@ impl Hardware for MockHardware {
     fn write_buffer(&mut self, _buffer: BufferHandle, _data: &[u8]) {
         // No-op for mock
     }
+
+	fn save_screenshot(&mut self, _window: WindowHandle, _path: &str) {
+		// No-op for mock
+	}
 }

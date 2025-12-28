@@ -649,6 +649,16 @@ where
 			self.update_windows();
 			self.app.on_process(&mut self.state, dt);
 		}
+		if let Some((window_id, path)) = self.state.screenshot_request.take() {
+			let ctx = match self.windows.iter().find(|w| w.window_id == window_id) {
+				Some(ctx) => ctx,
+				None => {
+					log::error!("Window context not found for screenshot: {:?}", window_id);
+					return;
+				}
+			};
+			self.hardware.save_screenshot(ctx.window, &path);
+		}
         for (window_id, _) in &self.state.windows {
 			let ctx = match self.windows.iter().find(|w| w.window_id == window_id) {
 				Some(ctx) => ctx,
