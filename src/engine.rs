@@ -76,6 +76,7 @@ struct WindowContext {
 	window_id: ArenaId<Window>,
 	window: WindowHandle,
 	pipeline: PipelineHandle,
+	gui_pipeline: PipelineHandle,
 }
 
 struct NodeComputedMetadata {
@@ -551,10 +552,12 @@ where
 			crate::log1!("Creating window: {:?}", window_id);
             let handle = self.hardware.create_window(&window);
 			let pipeline = self.hardware.create_pipeline("pipeline", handle);
+			let gui_pipeline = self.hardware.create_pipeline("gui", handle);
 			self.windows.push(WindowContext {
 				window_id,
 				window: handle,
 				pipeline,
+				gui_pipeline,
 			});
         }
 
@@ -768,6 +771,28 @@ where
                     pass.draw_indexed(call.indices_range.clone(), instances.start as u32..instances.end as u32);
                 }
             }
+
+			if let Some(gui_buffers) = self.gui_buffers.get(&args.ui) {
+				if gui_buffers.indices_range.start != gui_buffers.indices_range.end
+					&& gui_buffers.position_range.start != gui_buffers.position_range.end
+					&& gui_buffers.colors_range.start != gui_buffers.colors_range.end
+					&& gui_buffers.index_range.start != gui_buffers.index_range.end
+				{
+					let gui_pass = encoder.begin_render_pass();
+					gui_pass.set_pipeline(ctx.gui_pipeline);
+					gui_pass.set_vertex_buffer(
+						0,
+						gui_buffers.vertices_buffer.slice(gui_buffers.position_range.clone()),
+					);
+					gui_pass.set_vertex_buffer(
+						1,
+						gui_buffers.color_buffer.slice(gui_buffers.colors_range.clone()),
+					);
+					gui_pass
+						.set_index_buffer(gui_buffers.index_buffer.slice(gui_buffers.index_range.clone()));
+					gui_pass.draw_indexed(gui_buffers.indices_range.clone(), 0..1);
+				}
+			}
             self.hardware.render(encoder, ctx.window);
 		}
 	}

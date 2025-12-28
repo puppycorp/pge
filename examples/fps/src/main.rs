@@ -467,7 +467,8 @@ impl pge::App for FpsShooter {
 
 		//Spawn random cubes
 		let mut rng = rand::thread_rng();
-		for i in 0..0 {
+		let cube_count = 0;
+		for i in 0..cube_count {
 			let x = rng.gen_range(-20.0..20.0);
 			let z = rng.gen_range(-20.0..20.0);
 			let mut cube_node = Node::new();

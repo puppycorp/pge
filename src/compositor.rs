@@ -6,6 +6,8 @@ use lyon::tessellation::FillOptions;
 use lyon::tessellation::FillTessellator;
 use lyon::tessellation::FillVertex;
 use lyon::tessellation::VertexBuffers;
+use ttf_parser::Face;
+use ttf_parser::OutlineBuilder;
 
 pub use crate::gui::*;
 use crate::internal_types::*;
@@ -100,8 +102,75 @@ pub struct DrawText {
 	pub text: String,
 	pub font_size: f32,
 	pub font_color: [f32; 4],
+	pub outline: Outline,
 }
 
+const DEFAULT_UI_HEIGHT: f32 = 600.0;
+const DEFAULT_FONT_DATA: &[u8] = include_bytes!("../fonts/Roboto-Regular.ttf");
+
+struct GlyphPathBuilder {
+	builder: lyon::path::Builder,
+	scale: f32,
+	offset: [f32; 2],
+	has_contour: bool,
+}
+
+impl GlyphPathBuilder {
+	fn new(scale: f32, offset: [f32; 2]) -> Self {
+		Self {
+			builder: Path::builder(),
+			scale,
+			offset,
+			has_contour: false,
+		}
+	}
+
+	fn build(self) -> Path {
+		let mut builder = self.builder;
+		if self.has_contour {
+			builder.end(false);
+		}
+		builder.build()
+	}
+
+	fn transform(&self, x: f32, y: f32) -> Point {
+		point(x * self.scale + self.offset[0], y * self.scale + self.offset[1])
+	}
+}
+
+impl OutlineBuilder for GlyphPathBuilder {
+	fn move_to(&mut self, x: f32, y: f32) {
+		if self.has_contour {
+			self.builder.end(false);
+		}
+		self.builder.begin(self.transform(x, y));
+		self.has_contour = true;
+	}
+
+	fn line_to(&mut self, x: f32, y: f32) {
+		self.builder.line_to(self.transform(x, y));
+	}
+
+	fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+		self.builder
+			.quadratic_bezier_to(self.transform(x1, y1), self.transform(x, y));
+	}
+
+	fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+		self.builder.cubic_bezier_to(
+			self.transform(x1, y1),
+			self.transform(x2, y2),
+			self.transform(x, y),
+		);
+	}
+
+	fn close(&mut self) {
+		if self.has_contour {
+			self.builder.end(true);
+			self.has_contour = false;
+		}
+	}
+}
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,7 +186,7 @@ pub enum Size {
 	Content
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Outline {
 	pub left_up: [f32; 2],
 	pub right_up: [f32; 2],
@@ -208,7 +277,8 @@ impl Lineariser {
 			let text = DrawText {
 				text: text.clone(),
 				font_size,
-				font_color: item.font_color
+				font_color: item.font_color,
+				outline: outline.clone(),
 			};
 			self.items.push(DrawItem::Text(text));
 		}
@@ -301,9 +371,10 @@ impl Lineariser {
 	}
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Compositor {
 	lineariser: Lineariser,
+	font_face: Face<'static>,
 	pub positions: Vec<[f32; 3]>,
 	pub indices: Vec<u16>,
 	pub colors: Vec<[f32; 3]>,
@@ -312,8 +383,10 @@ pub struct Compositor {
 
 impl Compositor {
 	pub fn new() -> Self {
+		let font_face = Face::parse(DEFAULT_FONT_DATA, 0).expect("default font is invalid");
 		Self {
 			lineariser: Lineariser::new(),
+			font_face,
 			positions: Vec::new(),
 			indices: Vec::new(),
 			colors: Vec::new(),
@@ -329,7 +402,8 @@ impl Compositor {
 
 		self.lineariser.linearize(item);
 
-		for draw in &self.lineariser.items {
+		let items = self.lineariser.items.clone();
+		for draw in &items {
 			match draw {
 				DrawItem::Rect(rect) => {
 					let (vertices, indices) = rect.generate_vertices_indices();
@@ -342,11 +416,78 @@ impl Compositor {
 					self.colors.extend(std::iter::repeat(rect.background_color).take(vertices.len()));
 					// self.colors.push(self.colors.last().unwrap().clone());
 				},
-				DrawItem::Text(text) => {},
+				DrawItem::Text(text) => {
+					self.draw_text(text);
+				},
 				DrawItem::CamView(view) => {
 					self.views.push(view.clone());
 				}
 			}
+		}
+	}
+
+	fn draw_text(&mut self, text: &DrawText) {
+		let units_per_em = self.font_face.units_per_em() as f32;
+		let font_size = text.font_size.max(1.0);
+		let font_scale = font_size * 2.0 / DEFAULT_UI_HEIGHT;
+		let scale = font_scale / units_per_em;
+		let ascender = self.font_face.ascender() as f32;
+		let descender = self.font_face.descender() as f32;
+		let line_gap = self.font_face.line_gap() as f32;
+		let line_height = (ascender - descender + line_gap) * scale;
+		let start_x = text.outline.left_up[0];
+		let mut pen_x = start_x;
+		let mut pen_y = text.outline.left_up[1] - ascender * scale;
+		let color = [text.font_color[0], text.font_color[1], text.font_color[2]];
+
+		for ch in text.text.chars() {
+			if ch == '\n' {
+				pen_x = start_x;
+				pen_y -= line_height;
+				continue;
+			}
+
+			let gid = match self.font_face.glyph_index(ch) {
+				Some(gid) => gid,
+				None => {
+					let advance = units_per_em * 0.5;
+					pen_x += advance * scale;
+					continue;
+				}
+			};
+
+			let mut builder = GlyphPathBuilder::new(scale, [pen_x, pen_y]);
+			let has_outline = self.font_face.outline_glyph(gid, &mut builder).is_some();
+			if has_outline {
+				let path = builder.build();
+				let mut geometry: VertexBuffers<Point, u16> = VertexBuffers::new();
+				let mut tessellator = FillTessellator::new();
+				if tessellator
+					.tessellate_path(
+						&path,
+						&FillOptions::default(),
+						&mut BuffersBuilder::new(&mut geometry, |vertex: FillVertex| {
+							Point::new(vertex.position().x, vertex.position().y)
+						}),
+					)
+					.is_ok()
+				{
+					let current_offset = self.positions.len() as u16;
+					self.positions
+						.extend(geometry.vertices.iter().map(|&p| [p.x, p.y, 0.0]));
+					self.indices
+						.extend(geometry.indices.iter().map(|&i| i + current_offset));
+					self.colors
+						.extend(std::iter::repeat(color).take(geometry.vertices.len()));
+				}
+			}
+
+			let advance = self
+				.font_face
+				.glyph_hor_advance(gid)
+				.map(|advance| advance as f32)
+				.unwrap_or(units_per_em * 0.5);
+			pen_x += advance * scale;
 		}
 	}
 }

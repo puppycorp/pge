@@ -50,13 +50,21 @@ impl Buffer {
     }
 
     pub fn flush(&mut self, hardware: &mut impl Hardware) {
-		if self.data.len() > self.handle.size as usize {
-			let new_size = (self.data.len() as f32 * 1.5) as u64;
+		let write_len = (self.data.len() + 3) & !3;
+		if write_len > self.handle.size as usize {
+			let new_size = (write_len as f32 * 1.5) as u64;
 			crate::log2!("resizing buffer {:?} from {} to {}", self.handle, self.handle.size, new_size);
 			hardware.destroy_buffer(self.handle);
 			self.handle = hardware.create_buffer("buffer", new_size);
 		}
-        hardware.write_buffer(self.handle, &self.data);
+		if write_len == self.data.len() {
+			hardware.write_buffer(self.handle, &self.data);
+		} else {
+			let mut padded = Vec::with_capacity(write_len);
+			padded.extend_from_slice(&self.data);
+			padded.resize(write_len, 0);
+			hardware.write_buffer(self.handle, &padded);
+		}
         self.data.clear();
     }
 }
@@ -118,7 +126,7 @@ mod tests {
 			let written = hardware.buffers_written.borrow();
 			assert_eq!(written.len(), 1);
 			assert_eq!(written[0].0, handle);
-			assert_eq!(written[0].1, vec![10, 20, 30]);
+			assert_eq!(written[0].1, vec![10, 20, 30, 0]);
 		}
 
         // Try writing again after flush
@@ -129,7 +137,7 @@ mod tests {
         let written = hardware.buffers_written.borrow();
         assert_eq!(written.len(), 2);
         assert_eq!(written[1].0, handle);
-        assert_eq!(written[1].1, vec![40, 50, 60]);
+        assert_eq!(written[1].1, vec![40, 50, 60, 0]);
     }
 
     #[test]

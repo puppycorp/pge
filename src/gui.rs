@@ -260,6 +260,8 @@ pub fn camera_view(camera_id: ArenaId<Camera>) -> GUIElement {
 pub fn text(t: &str) -> GUIElement {
 	GUIElement {
 		text: Some(t.to_string()),
+		font_size: 16,
+		font_color: [1.0, 1.0, 1.0, 1.0],
 		..Default::default()
 	}
 }
