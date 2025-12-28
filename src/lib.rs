@@ -12,6 +12,7 @@ mod spatial_grid;
 mod debug;
 //mod texture;
 mod gltf;
+mod urdf;
 mod arena;
 mod log;
 mod hardware;
@@ -21,15 +22,18 @@ mod wgpu;
 mod mock_hardware;
 mod collision_detection;
 pub mod utility;
+pub mod orbit;
 pub mod text;
 pub use types::*;
 pub use shapes::*;
 pub use gui::*;
 pub use arena::*;
 pub use glam::*;
+pub use orbit::*;
 pub use log::*;
 pub use state::*;
 pub use gltf::load_gltf;
+pub use urdf::load_urdf;
 
 #[cfg(not(feature = "wgpu_winit"))]
 pub fn run<T>(app: T) -> anyhow::Result<()>
