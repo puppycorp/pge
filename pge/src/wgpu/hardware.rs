@@ -1156,10 +1156,10 @@ fn screenshot_dir_from_env() -> Option<PathBuf> {
 		return None;
 	}
 	let dir = match env::current_dir() {
-		Ok(dir) => dir.join("workdir").join("screenshots"),
+		Ok(dir) => dir.join("screenshots"),
 		Err(err) => {
 			log::error!("Failed to read current dir for screenshots: {:?}", err);
-			PathBuf::from("workdir").join("screenshots")
+			PathBuf::from("screenshots")
 		}
 	};
 	if let Err(err) = fs::create_dir_all(&dir) {
@@ -1816,6 +1816,7 @@ impl Hardware for HeadlessWgpuHardware {
 					let filename = format!("screenshot_{}_{}.png", window.id, frame_index);
 					let path = dir.join(filename);
 					screenshot_path = Some(path.to_string_lossy().to_string());
+					log::info!("Screenshot path: {:?}", screenshot_path);
 				}
 			}
 		}

@@ -133,25 +133,11 @@ pub struct GUIElement {
 }
 
 impl GUIElement {
+
 	pub fn new() -> Self {
 		Self {
 			..Default::default()
 		}
-	}
-
-	pub fn add(mut self, child: GUIElement) -> Self {
-		self.children.push(child);
-		self
-	}
-
-	pub fn add_many(mut self, children: Vec<GUIElement>) -> Self {
-		self.children.extend(children);
-		self
-	}
-
-	pub fn background_color(mut self, color: [f32; 3]) -> Self {
-		self.background_color = Some(color);
-		self
 	}
 
 	pub fn grow(mut self, grow: u32) -> Self {
@@ -159,13 +145,8 @@ impl GUIElement {
 		self
 	}
 
-	pub fn camera(mut self, camera_id: ArenaId<Camera>) -> Self {
-		self.camera_id = Some(camera_id);
-		self
-	}
-
-	pub fn font(mut self, font: FontHandle) -> Self {
-		self.font = Some(font);
+	pub fn background_color(mut self, color: [f32; 3]) -> Self {
+		self.background_color = Some(color);
 		self
 	}
 
@@ -179,11 +160,6 @@ impl GUIElement {
 
 	pub fn height(mut self, height: f32) -> Self {
 		self.height = Some(height);
-		self
-	}
-
-	pub fn width(mut self, width: f32) -> Self {
-		self.width = Some(width);
 		self
 	}
 
@@ -240,6 +216,13 @@ pub fn empty() -> GUIElement {
 pub fn rect() -> GUIElement {
 	GUIElement {
 		background_color: Some(Color::WHITE),
+		..Default::default()
+	}
+}
+
+pub fn slider() -> GUIElement {
+	GUIElement {
+		background_color: Some(Color::LIGHT_GRAY),
 		..Default::default()
 	}
 }

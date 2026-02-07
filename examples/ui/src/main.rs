@@ -26,6 +26,7 @@ impl App for UiExample {
 					rect().background_color(Color::BLUE).grow(1),
 				])
 				.grow(2),
+				slider().height(20.0),
 			]),
 		]);
 		let gui_id = state.guis.insert(ui);
@@ -39,3 +40,4 @@ fn main() {
 	pge::init_logging();
 	pge::run(UiExample::default()).unwrap();
 }
+
