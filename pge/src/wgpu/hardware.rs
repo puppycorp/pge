@@ -1236,11 +1236,11 @@ fn run_headless_with_wgpu(app: impl App) -> anyhow::Result<()> {
 	let adapter = match adapter {
 		Some(adapter) => adapter,
 		None => {
-			log::error!("Failed to find an adapter for headless screenshots; falling back to windowed screenshots.");
-			return run_with_winit(app, read_iterations());
+			log::error!("Failed to find an adapter for headless rendering; falling back to mock software renderer.");
+			return run_headless_with_mock(app);
 		}
 	};
-	let (device, queue) = block_on(adapter
+	let (device, queue) = match block_on(adapter
 		.request_device(
 			&wgpu::DeviceDescriptor {
 				required_features: wgpu::Features::VERTEX_WRITABLE_STORAGE,
@@ -1253,13 +1253,28 @@ fn run_headless_with_wgpu(app: impl App) -> anyhow::Result<()> {
 			..Default::default()
 		},
 		None,
-		))
-		.expect("Failed to create device");
+		)) {
+			Ok((device, queue)) => (device, queue),
+			Err(err) => {
+				log::error!("Failed to create headless device ({err}); falling back to mock software renderer.");
+				return run_headless_with_mock(app);
+			}
+		};
 
 	let device = Arc::new(device);
 	let queue = Arc::new(queue);
 	let hardware = HeadlessWgpuHardware::new(device, queue);
 	run_headless_loop(app, hardware, |engine, dt| engine.render(dt))
+}
+
+fn run_headless_with_mock(app: impl App) -> anyhow::Result<()> {
+	let should_render = screenshot_enabled();
+	crate::log1!("Using mock software renderer for headless execution.");
+	if should_render {
+		run_headless_loop(app, MockHardware::new(), |engine, dt| engine.render(dt))
+	} else {
+		run_headless_loop(app, MockHardware::new(), |engine, dt| engine.tick_headless(dt))
+	}
 }
 
 fn read_iterations() -> Option<u64> {

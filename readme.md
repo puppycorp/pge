@@ -26,6 +26,8 @@ Limits the number of app ticks before exiting (headless and normal). Logs progre
 
 When set to 1, saves rendered frames to `./workdir/screenshots` as PNG files. Works in normal mode and in headless offscreen mode.
 
+If no GPU adapter is available, SCREENSHOT/HEADLESS rendering will fall back to a software mock renderer so screenshot capture still succeeds (with a generated fallback image) instead of panicking on adapter creation.
+
 ### SCREENSHOT_INTERVAL (number)
 
 When SCREENSHOT is 1, save a frame every N renders (default 1).
