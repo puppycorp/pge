@@ -17,6 +17,7 @@ use crate::utility::topo_sort_nodes;
 use crate::ArenaId;
 use crate::GUIElement;
 use crate::Window;
+use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::time::Duration;
@@ -84,7 +85,7 @@ struct NodeComputedMetadata {
 	scene_id: ArenaId<Scene>,
 }
 
-pub struct Engine<A, H> {
+pub struct Engine<A, H, E = ()> {
     pub app: A,
     pub state: State,
     hardware: H,
@@ -108,12 +109,13 @@ pub struct Engine<A, H> {
 	//nodes: HashMap<ArenaId<Node>, NodeComputedMetadata>,
 	mesh_nodes: HashMap<ArenaId<Mesh>, Vec<ArenaId<Node>>>,
 	topo_sorted_nodes: Vec<ArenaId<Node>>,
-	fps: u32
+	fps: u32,
+	_event_type: PhantomData<E>,
 }
 
-impl<A, H> Engine<A, H>
+impl<A, E, H> Engine<A, H, E>
 where
-    A: App,
+    A: App<E>,
     H: Hardware,
 {
     pub fn new(mut app: A, mut hardware: H) -> Self {
@@ -161,7 +163,8 @@ where
 			//nodes: HashMap::new(),
 			mesh_nodes: HashMap::new(),
 			fps: 0,
-			topo_sorted_nodes: Vec::new(),
+		topo_sorted_nodes: Vec::new(),
+		_event_type: PhantomData,
         }
     }
 
@@ -670,13 +673,14 @@ where
 					continue;
 				}
 			};
-            let mut encoder = RenderEncoder::new();
-            let args = match self.get_window_render_args(window_id) {
-                Some(a) => a,
-                None => {
-                    panic!("Window render args not found");
-                }
-            };
+	            let mut encoder = RenderEncoder::new();
+	            let args = match self.get_window_render_args(window_id) {
+	                Some(a) => a,
+	                None => {
+						log::error!("Window render args not found for {:?}, skipping render.", window_id);
+						continue;
+	                }
+	            };
 
             let pass = encoder.begin_render_pass();
 			pass.set_pipeline(ctx.pipeline);

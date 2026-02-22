@@ -46,4 +46,4 @@ where
 }
 
 #[cfg(feature = "wgpu_winit")]
-pub use crate::wgpu::run;
+pub use crate::wgpu::{run, run_with_event_sender};

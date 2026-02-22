@@ -815,6 +815,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "event_sender"
+version = "0.1.0"
+dependencies = [
+ "pge",
+]
+
+[[package]]
 name = "exr"
 version = "1.72.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

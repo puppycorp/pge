@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::thread::sleep;
 use std::time::Duration;
 use std::time::Instant;
@@ -101,11 +101,12 @@ struct PipelineContext {
 	uses_depth: bool,
 }
 
-struct PgeWininitHandler<'a, A, H> {
-	engine: Engine<A, H>,
+struct PgeWininitHandler<'a, A, H, E> {
+	engine: Engine<A, H, E>,
 	start_time: Instant,
 	last_on_process_time: Instant,
 	max_iterations: Option<u64>,
+	app_events: Option<mpsc::Receiver<E>>,
 	iterations: u64,
 	progress_interval: u64,
 	windows: Vec<WindowContext<'a>>,
@@ -146,8 +147,19 @@ struct HeadlessWgpuHardware {
 	screenshot_interval: u64,
 }
 
-impl<'a, A, H> PgeWininitHandler<'a, A, H> {
-	fn new(engine: Engine<A, H>, adapter: Arc<wgpu::Adapter>, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, instance: Arc<wgpu::Instance>, max_iterations: Option<u64>) -> Self {
+impl<'a, A, H, E> PgeWininitHandler<'a, A, H, E>
+where
+	A: App<E>,
+{
+	fn new(
+		engine: Engine<A, H, E>,
+		adapter: Arc<wgpu::Adapter>,
+		device: Arc<wgpu::Device>,
+		queue: Arc<wgpu::Queue>,
+		instance: Arc<wgpu::Instance>,
+		app_events: Option<mpsc::Receiver<E>>,
+		max_iterations: Option<u64>,
+	) -> Self {
 		let progress_interval = max_iterations
 			.map(iteration_log_interval)
 			.unwrap_or(0);
@@ -158,6 +170,7 @@ impl<'a, A, H> PgeWininitHandler<'a, A, H> {
 			start_time: Instant::now(),
 			last_on_process_time: Instant::now(),
 			max_iterations,
+			app_events,
 			iterations: 0,
 			progress_interval,
 			windows: Vec::new(),
@@ -190,11 +203,20 @@ impl<'a, A, H> PgeWininitHandler<'a, A, H> {
 			runtime_secs
 		);
 	}
+
+	fn drain_app_events(&mut self) {
+		let Some(receiver) = self.app_events.as_mut() else {
+			return;
+		};
+		while let Ok(event) = receiver.try_recv() {
+			self.engine.app.on_event(event, &mut self.engine.state);
+		}
+	}
 }
 
-impl<'a, A, H> ApplicationHandler<UserEvent> for PgeWininitHandler<'a, A, H> 
+impl<'a, A, H, E> ApplicationHandler<UserEvent> for PgeWininitHandler<'a, A, H, E> 
 where
-	A: App,
+	A: App<E>,
 	H: Hardware,
 {
 	fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
@@ -880,6 +902,7 @@ where
 	}*/
 
 	fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+		self.drain_app_events();
 		let dt = self.last_on_process_time.elapsed().as_secs_f32();
 		if dt < 0.016 {
 			return
@@ -1072,7 +1095,10 @@ where
 	}
 }
 
-fn run_with_winit(app: impl App, max_iterations: Option<u64>) -> anyhow::Result<()> {
+fn run_with_winit<A, E>(app: A, max_iterations: Option<u64>, app_events: Option<mpsc::Receiver<E>>) -> anyhow::Result<()>
+where
+	A: App<E>,
+{
 	let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
 	let adapters = instance.enumerate_adapters(wgpu::Backends::all());
 	for adapter in adapters {
@@ -1112,15 +1138,43 @@ fn run_with_winit(app: impl App, max_iterations: Option<u64>) -> anyhow::Result<
 	let proxy = event_loop.create_proxy();
 	let hardware = WgpuHardware::new(proxy, instance.clone(), adapter.clone(), device.clone(), queue.clone());
 	let engine = Engine::new(app, hardware);
-	let mut handler = PgeWininitHandler::new(engine, adapter, device, queue, instance, max_iterations);
+	let mut handler = PgeWininitHandler::new(
+		engine,
+		adapter,
+		device,
+		queue,
+		instance,
+		app_events,
+		max_iterations,
+	);
 	Ok(event_loop.run_app(&mut handler)?)
 }
 
-pub fn run(app: impl App) -> anyhow::Result<()> {
+pub fn run<A>(app: A) -> anyhow::Result<()>
+where
+	A: App,
+{
+	run_with_receiver(app, None)
+}
+
+pub fn run_with_event_sender<A, E, F>(app: A, with_sender: F) -> anyhow::Result<()>
+where
+	A: App<E>,
+	F: FnOnce(mpsc::Sender<E>),
+{
+	let (sender, receiver) = mpsc::channel::<E>();
+	with_sender(sender);
+	run_with_receiver(app, Some(receiver))
+}
+
+fn run_with_receiver<A, E>(app: A, app_events: Option<mpsc::Receiver<E>>) -> anyhow::Result<()>
+where
+	A: App<E>,
+{
 	if is_headless() {
-		return run_headless(app);
+		return run_headless(app, app_events);
 	}
-	run_with_winit(app, read_iterations())
+	run_with_winit(app, read_iterations(), app_events)
 }
 
 fn flag_enabled(name: &str) -> bool {
@@ -1168,11 +1222,11 @@ fn screenshot_dir_from_env() -> Option<PathBuf> {
 	Some(dir)
 }
 
-fn run_headless_loop<A, H, F>(app: A, hardware: H, mut tick: F) -> anyhow::Result<()>
+fn run_headless_loop<A, H, E, F>(app: A, hardware: H, mut tick: F, mut app_events: Option<mpsc::Receiver<E>>) -> anyhow::Result<()>
 where
-	A: App,
+	A: App<E>,
 	H: Hardware,
-	F: FnMut(&mut Engine<A, H>, f32),
+	F: FnMut(&mut Engine<A, H, E>, f32),
 {
 	let mut engine = Engine::new(app, hardware);
 	let mut last_tick = Instant::now();
@@ -1185,6 +1239,11 @@ where
 	let mut iterations = 0u64;
 
 	loop {
+		if let Some(receiver) = app_events.as_mut() {
+			while let Ok(event) = receiver.try_recv() {
+				engine.app.on_event(event, &mut engine.state);
+			}
+		}
 		if let Some(max) = max_iterations {
 			if iterations >= max {
 				crate::log1!("Headless exiting: ITERATIONS limit reached ({}).", max);
@@ -1216,14 +1275,20 @@ where
 	Ok(())
 }
 
-fn run_headless(app: impl App) -> anyhow::Result<()> {
+fn run_headless<A, E>(app: A, app_events: Option<mpsc::Receiver<E>>) -> anyhow::Result<()>
+where
+	A: App<E>,
+{
 	if screenshot_enabled() {
-		return run_headless_with_wgpu(app);
+		return run_headless_with_wgpu(app, app_events);
 	}
-	run_headless_loop(app, MockHardware::new(), |engine, dt| engine.tick_headless(dt))
+	run_headless_loop(app, MockHardware::new(), |engine, dt| engine.tick_headless(dt), app_events)
 }
 
-fn run_headless_with_wgpu(app: impl App) -> anyhow::Result<()> {
+fn run_headless_with_wgpu<A, E>(app: A, app_events: Option<mpsc::Receiver<E>>) -> anyhow::Result<()>
+where
+	A: App<E>,
+{
 	let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
 	let mut adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()));
 	if adapter.is_none() {
@@ -1237,7 +1302,7 @@ fn run_headless_with_wgpu(app: impl App) -> anyhow::Result<()> {
 		Some(adapter) => adapter,
 		None => {
 			log::error!("Failed to find an adapter for headless rendering; falling back to mock software renderer.");
-			return run_headless_with_mock(app);
+			return run_headless_with_mock(app, app_events);
 		}
 	};
 	let (device, queue) = match block_on(adapter
@@ -1257,23 +1322,26 @@ fn run_headless_with_wgpu(app: impl App) -> anyhow::Result<()> {
 			Ok((device, queue)) => (device, queue),
 			Err(err) => {
 				log::error!("Failed to create headless device ({err}); falling back to mock software renderer.");
-				return run_headless_with_mock(app);
+				return run_headless_with_mock(app, app_events);
 			}
 		};
 
 	let device = Arc::new(device);
 	let queue = Arc::new(queue);
 	let hardware = HeadlessWgpuHardware::new(device, queue);
-	run_headless_loop(app, hardware, |engine, dt| engine.render(dt))
+	run_headless_loop(app, hardware, |engine, dt| engine.render(dt), app_events)
 }
 
-fn run_headless_with_mock(app: impl App) -> anyhow::Result<()> {
+fn run_headless_with_mock<A, E>(app: A, app_events: Option<mpsc::Receiver<E>>) -> anyhow::Result<()>
+where
+	A: App<E>,
+{
 	let should_render = screenshot_enabled();
 	crate::log1!("Using mock software renderer for headless execution.");
 	if should_render {
-		run_headless_loop(app, MockHardware::new(), |engine, dt| engine.render(dt))
+		run_headless_loop(app, MockHardware::new(), |engine, dt| engine.render(dt), app_events)
 	} else {
-		run_headless_loop(app, MockHardware::new(), |engine, dt| engine.tick_headless(dt))
+		run_headless_loop(app, MockHardware::new(), |engine, dt| engine.tick_headless(dt), app_events)
 	}
 }
 
