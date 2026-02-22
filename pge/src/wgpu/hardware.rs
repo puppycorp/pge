@@ -1027,9 +1027,7 @@ where
 				self.log_exit_stats();
 				event_loop.exit();
 			}
-			WindowEvent::RedrawRequested => {
-				println!("redraw requested for window {:?}", window_id);
-			}
+			WindowEvent::RedrawRequested => {}
 			WindowEvent::CursorMoved {
 				device_id,
 				position,
