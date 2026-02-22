@@ -1,27 +1,45 @@
 use args::Command;
 use clap::Parser;
-use pge::editor::with_editor;
-use pge::App;
+use pge::*;
 
 mod args;
 
 #[derive(Default)]
-struct EmptyApp;
+struct EditorCliApp {
+	editor: pge::editor::EditorPlugin,
+}
 
-impl App for EmptyApp {}
+impl App for EditorCliApp {
+	fn on_create(&mut self, state: &mut State) {
+		self.editor.on_create(state);
+	}
+
+	fn on_process(&mut self, state: &mut State, dt: f32) {
+		self.editor.on_process(state, dt);
+	}
+
+	fn on_mouse_input(
+		&mut self,
+		window_id: ArenaId<Window>,
+		event: MouseEvent,
+		_state: &mut State,
+	) {
+		self.editor.on_mouse_input(window_id, event);
+	}
+}
 
 fn main() {
 	pge::init_logging();
 
-	let mut app = with_editor(EmptyApp::default());
-	app.editor_mut().settings.add_light = true;
+	let mut app = EditorCliApp::default();
+	app.editor.settings.add_light = true;
 
 	let args = args::Args::parse();
 
 	if let Some(command) = args.command {
 		match command {
 			Command::Inspect { path } => {
-				app.editor_mut().set_inspect_path(path);
+				app.editor.set_inspect_path(path);
 			}
 		}
 	}

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fs;
 use std::path::Path;
 
 use crate::*;
@@ -141,39 +142,64 @@ impl EditorPlugin {
 
 	pub fn on_create(&mut self, state: &mut State) {
 		if let Some(path) = &self.asset_path {
-			let ext = Path::new(path)
-				.extension()
-				.and_then(|ext| ext.to_str())
-				.unwrap_or_default();
-			if ext.eq_ignore_ascii_case("urdf") {
+			let asset_path = Path::new(path);
+			if Self::is_urdf_asset(asset_path) {
 				state.load_urdf(path);
 			} else {
 				state.load_3d_model(path);
 			}
 		}
+		self.create_scene_viewers_for_new_scenes(state);
 	}
 
-	pub fn on_process(&mut self, state: &mut State, dt: f32) {
+	fn is_urdf_asset(path: &Path) -> bool {
+		let ext = path
+			.extension()
+			.and_then(|ext| ext.to_str())
+			.unwrap_or_default();
+		if ext.eq_ignore_ascii_case("urdf") {
+			return true;
+		}
+		if !ext.eq_ignore_ascii_case("xml") {
+			return false;
+		}
+
+		let content = match fs::read_to_string(path) {
+			Ok(content) => content,
+			Err(_) => return false,
+		};
+		content.contains("<robot")
+	}
+
+	fn discover_new_scenes(&mut self, state: &State) -> Vec<ArenaId<Scene>> {
 		let mut new_scene_ids = Vec::new();
 		for (scene_id, _) in state.scenes.iter() {
 			if self.scenes.contains(&scene_id) {
 				continue;
 			}
-			let node_count = state
+			let has_nodes = state
 				.nodes
 				.iter()
-				.filter(|(_, node)| node.scene_id == Some(scene_id))
-				.count();
-			if node_count == 0 {
+				.any(|(_, node)| node.parent == NodeParent::Scene(scene_id) || node.scene_id == Some(scene_id));
+			if !has_nodes {
 				continue;
 			}
 			new_scene_ids.push(scene_id);
 			self.scenes.insert(scene_id);
 		}
+		new_scene_ids
+	}
+
+	fn create_scene_viewers_for_new_scenes(&mut self, state: &mut State) {
+		let new_scene_ids = self.discover_new_scenes(state);
 		for scene_id in new_scene_ids {
 			let scene_viewer = SceneViewer::new(state, scene_id, &self.settings);
 			self.scene_viewers.push(scene_viewer);
 		}
+	}
+
+	pub fn on_process(&mut self, state: &mut State, dt: f32) {
+		self.create_scene_viewers_for_new_scenes(state);
 		for scene_viewer in &mut self.scene_viewers {
 			scene_viewer.on_process(state, dt);
 		}
@@ -253,4 +279,67 @@ impl<T: App> App for EditorApp<T> {
 
 pub fn with_editor<T: App>(app: T) -> EditorApp<T> {
 	EditorApp::new(app)
+}
+
+#[cfg(test)]
+mod tests {
+	use std::fs;
+	use std::path::PathBuf;
+	use std::time::{SystemTime, UNIX_EPOCH};
+
+	use super::*;
+
+	fn write_temp_urdf() -> PathBuf {
+		let nanos = SystemTime::now()
+			.duration_since(UNIX_EPOCH)
+			.unwrap()
+			.as_nanos();
+		let path = std::env::temp_dir().join(format!("pge_editor_{}.urdf", nanos));
+		let urdf = r#"<robot name="editor_test_robot">
+  <link name="base_link"/>
+</robot>"#;
+		fs::write(&path, urdf).expect("Failed to write temporary URDF");
+		path
+	}
+
+	#[test]
+	fn editor_loads_urdf_from_inspect_path() {
+		let urdf_path = write_temp_urdf();
+
+		let mut state = State::default();
+		let mut editor = EditorPlugin::new();
+		editor.set_inspect_path(&urdf_path);
+		editor.on_create(&mut state);
+
+		assert_eq!(state.scenes.len(), 1);
+		let (_, scene) = state.scenes.iter().next().expect("Missing scene");
+		assert_eq!(scene.name.as_deref(), Some("editor_test_robot"));
+
+		let _ = fs::remove_file(urdf_path);
+	}
+
+	#[test]
+	fn editor_loads_urdf_from_xml_path() {
+		let nanos = SystemTime::now()
+			.duration_since(UNIX_EPOCH)
+			.unwrap()
+			.as_nanos();
+		let xml_path = std::env::temp_dir().join(format!("pge_editor_{}.xml", nanos));
+		let urdf = r#"<robot name="editor_xml_robot">
+# comment line used by some urdf exporters
+  <link name="base_link"/>
+</robot>"#;
+		fs::write(&xml_path, urdf).expect("Failed to write temporary URDF xml");
+
+		let mut state = State::default();
+		let mut editor = EditorPlugin::new();
+		editor.set_inspect_path(&xml_path);
+		editor.on_create(&mut state);
+
+		assert_eq!(state.scenes.len(), 1);
+		let (_, scene) = state.scenes.iter().next().expect("Missing scene");
+		assert_eq!(scene.name.as_deref(), Some("editor_xml_robot"));
+
+		let _ = fs::remove_file(xml_path);
+	}
 }

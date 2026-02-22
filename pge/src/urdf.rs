@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use urdf_rs::{read_file, Geometry, JointType as UrdfJointType, Pose, Vec3};
+use urdf_rs::{read_file, read_from_string, Geometry, JointType as UrdfJointType, Pose, Vec3};
 
 use crate::types::*;
 use crate::{ArenaId, State};
@@ -154,8 +154,21 @@ fn joint_axis_or_default(joint_axis: &Vec3) -> glam::Vec3 {
 
 pub fn load_urdf<P: AsRef<Path>>(p: P, state: &mut State) -> ArenaId<Scene> {
 	let urdf_path = p.as_ref();
-	let robot = read_file(urdf_path).expect("Failed to read URDF");
-	let scene_id = state.scenes.insert(Scene::new());
+	let robot = match read_file(urdf_path) {
+		Ok(robot) => robot,
+		Err(_) => {
+			let urdf_string = std::fs::read_to_string(urdf_path).expect("Failed to read URDF file");
+			let sanitized: String = urdf_string
+				.lines()
+				.filter(|line| !line.trim_start().starts_with('#'))
+				.collect::<Vec<_>>()
+				.join("\n");
+			read_from_string(&sanitized).expect("Failed to read URDF")
+		}
+	};
+	let mut scene = Scene::new();
+	scene.name = Some(robot.name.clone());
+	let scene_id = state.scenes.insert(scene);
 
 	let unit_cube = state.meshes.insert(cube(0.5));
 	let mut mesh_by_path = HashMap::new();
