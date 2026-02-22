@@ -9,7 +9,7 @@ use std::time::Instant;
 use std::env;
 use futures::executor::block_on;
 use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalPosition;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::MouseScrollDelta;
 use winit::event::WindowEvent;
 use winit::event_loop::ControlFlow;
@@ -96,6 +96,7 @@ struct WindowContext<'a> {
 
 struct PipelineContext {
 	id: u32,
+	window_id: u32,
 	pipeline: Arc<wgpu::RenderPipeline>,
 	depth_texture_view: Option<Arc<wgpu::TextureView>>,
 	uses_depth: bool,
@@ -150,6 +151,7 @@ struct HeadlessWgpuHardware {
 impl<'a, A, H, E> PgeWininitHandler<'a, A, H, E>
 where
 	A: App<E>,
+	H: Hardware,
 {
 	fn new(
 		engine: Engine<A, H, E>,
@@ -202,6 +204,64 @@ where
 			avg_fps,
 			runtime_secs
 		);
+	}
+
+	fn on_window_resized(&mut self, window_id: winit::window::WindowId, size: PhysicalSize<u32>) {
+		let Some(window_index) = self.windows.iter().position(|window_ctx| window_ctx.winit_id == window_id) else {
+			log::error!("Window not found: {:?}", window_id);
+			return;
+		};
+
+		let window_ctx_id = self.windows[window_index].window_id;
+		if size.width == 0 || size.height == 0 {
+			return;
+		}
+
+		let window_ctx = &mut self.windows[window_index];
+		let Some(surface_format) = window_ctx.surface_format else {
+			self.engine.on_resize(size.width, size.height);
+			window_ctx.wininit_window.request_redraw();
+			return;
+		};
+
+		let surface_caps = window_ctx.surface.get_capabilities(&self.adapter);
+		let config = wgpu::SurfaceConfiguration {
+			usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+			format: surface_format,
+			width: size.width,
+			height: size.height,
+			present_mode: surface_caps.present_modes[0],
+			alpha_mode: surface_caps.alpha_modes[0],
+			view_formats: vec![],
+			desired_maximum_frame_latency: 1,
+		};
+		window_ctx.surface.configure(&self.device, &config);
+		window_ctx.wininit_window.request_redraw();
+
+		for pipeline_ctx in &mut self.pipelines {
+			if pipeline_ctx.window_id != window_ctx_id || !pipeline_ctx.uses_depth {
+				continue;
+			}
+			let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+				label: Some("Depth Texture"),
+				size: wgpu::Extent3d {
+					width: size.width,
+					height: size.height,
+					depth_or_array_layers: 1,
+				},
+				mip_level_count: 1,
+				sample_count: 1,
+				dimension: wgpu::TextureDimension::D2,
+				format: wgpu::TextureFormat::Depth24PlusStencil8,
+				usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+				view_formats: Default::default(),
+			});
+			let depth_texture_view =
+				Arc::new(depth_texture.create_view(&wgpu::TextureViewDescriptor::default()));
+			pipeline_ctx.depth_texture_view = Some(depth_texture_view);
+		}
+
+		self.engine.on_resize(size.width, size.height);
 	}
 
 	fn drain_app_events(&mut self) {
@@ -491,6 +551,7 @@ where
 
 				let pipeline_ctx = PipelineContext {
 					id: pipeline_id,
+					window_id: window.id,
 					pipeline: Arc::new(render_pipeline),
 					depth_texture_view,
 					uses_depth,
@@ -936,6 +997,22 @@ where
 		window_id: winit::window::WindowId,
 		event: winit::event::WindowEvent,
 	) {
+		if let WindowEvent::Resized(size) = &event {
+			self.on_window_resized(window_id, *size);
+			return;
+		}
+		if let WindowEvent::ScaleFactorChanged { .. } = &event {
+			let size = self
+				.windows
+				.iter()
+				.find(|window| window.winit_id == window_id)
+				.map(|window| window.wininit_window.inner_size());
+			if let Some(size) = size {
+				self.on_window_resized(window_id, size);
+			}
+			return;
+		}
+
 		let window_ctx = match self.windows.iter_mut().find(|window| window.winit_id == window_id) {
 			Some(window) => window,
 			None => {
@@ -1867,6 +1944,7 @@ impl Hardware for HeadlessWgpuHardware {
 		};
 		self.pipelines.push(PipelineContext {
 			id: pipeline_id,
+			window_id: window.id,
 			pipeline: Arc::new(render_pipeline),
 			depth_texture_view,
 			uses_depth,

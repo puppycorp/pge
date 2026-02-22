@@ -588,6 +588,16 @@ where
 		self.app.on_keyboard_input(window_ctx.window_id, key, action, &mut self.state);
     }
 
+	pub fn on_resize(&mut self, width: u32, height: u32) {
+		if width == 0 || height == 0 {
+			return;
+		}
+		let aspect = width as f32 / height as f32;
+		for (_, camera) in self.state.cameras.iter_mut() {
+			camera.aspect = aspect;
+		}
+	}
+
 	pub fn tick_headless(&mut self, dt: f32) {
 		self.process_nodes();
 		self.app.on_process(&mut self.state, dt);

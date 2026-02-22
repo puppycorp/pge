@@ -29,3 +29,5 @@ how much is logged see readme for descriptions. Also if you
 can temporarily add logging if you think that is nessesary for testing.
 Agents can also use SCREENSHOT=1 to save rendered frames to ./workdir/screenshots for debugging. Use SCREENSHOT_INTERVAL to control how often frames are saved.
 Remember to add ITERATIONS when you run things otherwise it might run forever.
+
+**IMPORTANT** when taking screenshots use ./workdir folder since it is git ignored so developers dont accidentally commit screenshots.
