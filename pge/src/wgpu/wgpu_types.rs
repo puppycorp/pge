@@ -122,6 +122,8 @@ struct MaterialUniform {
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct RawCamera {
     pub model: [[f32; 4]; 4],
+    pub position: [f32; 3],
+    pub _padding: f32,
 }
 
 impl BindableBufferRecipe for RawCamera {
@@ -173,7 +175,7 @@ impl RawInstance {
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<RawInstance>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
-			attributes: &[
+            attributes: &[
                 // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
                 // for each vec4. We'll have to reassemble the mat4 in the shader.
                 wgpu::VertexAttribute {
@@ -214,78 +216,76 @@ pub struct Keyframe {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct RawPointLight {
-    pub color: [f32; 3], // 12 bytes
-    _padding1: f32,      // 4 bytes to align `intensity` to 16 bytes
-    pub intensity: f32,  // 4 bytes
-    _padding2: [f32; 3], // 12 bytes to align `position` to 16 bytes
+    pub color: [f32; 3],    // 12 bytes
+    _padding1: f32,         // 4 bytes to align `intensity` to 16 bytes
+    pub intensity: f32,     // 4 bytes
+    _padding2: [f32; 3],    // 12 bytes to align `position` to 16 bytes
     pub position: [f32; 3], // 12 bytes
-    _padding3: f32,      // 4 bytes to align the total size to 16 bytes
+    _padding3: f32,         // 4 bytes to align the total size to 16 bytes
 }
 
 impl RawPointLight {
-	pub fn new(color: [f32; 3], intensity: f32, position: [f32; 3]) -> Self {
-		Self {
-			color,
-			_padding1: 0.0,
-			intensity,
-			_padding2: [0.0; 3],
-			position,
-			_padding3: 0.0,
-		}
-	}
+    pub fn new(color: [f32; 3], intensity: f32, position: [f32; 3]) -> Self {
+        Self {
+            color,
+            _padding1: 0.0,
+            intensity,
+            _padding2: [0.0; 3],
+            position,
+            _padding3: 0.0,
+        }
+    }
 }
 
 impl BindableBufferRecipe for RawPointLight {
-	fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-		device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-			label: Some("Point Light Bind Group Layout"),
-			entries: &[wgpu::BindGroupLayoutEntry {
-				binding: 0,
-				visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-				ty: wgpu::BindingType::Buffer {
-					ty: wgpu::BufferBindingType::Storage { read_only: true },
-					has_dynamic_offset: false,
-					min_binding_size: None,
-				},
-				count: None,
-			}],
-		})
-	}
+    fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Point Light Bind Group Layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        })
+    }
 
-	fn create_bind_group(
-		device: &wgpu::Device,
-		buffer: &wgpu::Buffer,
-		layout: &wgpu::BindGroupLayout,
-	) -> wgpu::BindGroup {
-		device.create_bind_group(&wgpu::BindGroupDescriptor {
-			layout,
-			entries: &[wgpu::BindGroupEntry {
-				binding: 0,
-				resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-					buffer,
-					offset: 0,
-					size: None,
-				}),
-			}],
-			label: Some("Point Light Bind Group"),
-		})
-	}
+    fn create_bind_group(
+        device: &wgpu::Device,
+        buffer: &wgpu::Buffer,
+        layout: &wgpu::BindGroupLayout,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            }],
+            label: Some("Point Light Bind Group"),
+        })
+    }
 }
 
 pub struct Colors {}
 
 impl Colors {
-	pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-		wgpu::VertexBufferLayout {
-			array_stride: std::mem::size_of::<Vertices>() as wgpu::BufferAddress,
-			step_mode: wgpu::VertexStepMode::Vertex,
-			attributes: &[
-				wgpu::VertexAttribute {
-					offset: 0,
-					format: wgpu::VertexFormat::Float32x4,
-					shader_location: 1,
-				}
-			]
-		}
-	}
+    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertices>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[wgpu::VertexAttribute {
+                offset: 0,
+                format: wgpu::VertexFormat::Float32x4,
+                shader_location: 1,
+            }],
+        }
+    }
 }

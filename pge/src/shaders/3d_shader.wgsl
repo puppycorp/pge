@@ -21,9 +21,13 @@ struct VertexOutput {
 
 struct Camera {
     model: mat4x4<f32>,
+    position: vec3<f32>,
+    _padding: f32,
 }
 @group(0) @binding(0)
 var<storage, read> camera: Camera;
+
+const MAX_POINT_LIGHTS: u32 = 16u;
 
 struct PointLight {
 	color: vec3<f32>,
@@ -35,6 +39,12 @@ struct PointLight {
 	_padding2: f32,
 };
 
+struct PointLightBuffer {
+	count: u32,
+	_padding: vec3<u32>,
+	lights: array<PointLight, MAX_POINT_LIGHTS>,
+};
+
 struct Material {
 	base_color_factor: vec4<f32>,
 	metallic_factor: f32,
@@ -43,7 +53,7 @@ struct Material {
 };
 
 @group(1) @binding(0)
-var<storage, read> point_lights: array<PointLight>;
+var<storage, read> point_lights: PointLightBuffer;
 
 @vertex
 fn vs_main(input: VertexInput, instance: InstanceInput) -> VertexOutput {
@@ -59,7 +69,7 @@ fn vs_main(input: VertexInput, instance: InstanceInput) -> VertexOutput {
     out.clip_position = camera.model * vec4<f32>(world_position, 1.0);
     out.color = vec3(1.0, 0.0, 0.0); // Placeholder for color, to be modified by lighting calculation
     out.world_position = world_position;
-	let normal = input.normal;
+	let normal = normalize((instance_model * vec4<f32>(input.normal, 0.0)).xyz);
 	out.normal = normal;
 	out.tex_coords = input.tex_coords;
     return out;
@@ -95,9 +105,10 @@ var<storage, read> material: Material;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let light_color = vec3<f32>(1.0, 1.0, 1.0);
-    let view_dir = normalize(camera.model[3].xyz - in.world_position);
-    var diffuse = vec3<f32>(0.0, 0.0, 0.0);
+    let view_dir = normalize(camera.position - in.world_position);
+    let normal = normalize(in.normal);
+    let ambient = 0.15;
+    var diffuse = vec3<f32>(ambient, ambient, ambient);
     var specular = vec3<f32>(0.0, 0.0, 0.0);
 
     let texture_color = textureSample(base_color_texture, base_color_sampler, in.tex_coords);
@@ -105,20 +116,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let roughness = material.roughness_factor;
     let metallic = material.metallic_factor;
 
-    for (var i = 0u; i < 2; i = i + 1u) {
-        let point_light = point_lights[i];
-        let light_position = point_light.position;
-        let light_dir = normalize(light_position - in.world_position);
+	let point_light_count = min(point_lights.count, MAX_POINT_LIGHTS);
+	for (var i = 0u; i < point_light_count; i = i + 1u) {
+		let point_light = point_lights.lights[i];
+		let light_position = point_light.position;
+		let light_delta = light_position - in.world_position;
+		let light_dir = normalize(light_delta);
+        let distance_sq = max(dot(light_delta, light_delta), 0.01);
+        let light_radiance = point_light.color * (point_light.intensity / distance_sq);
         let halfway_dir = normalize(light_dir + view_dir);
 
         // Diffuse
-        let ndotl = max(dot(in.normal, light_dir), 0.0);
-        diffuse += ndotl * light_color;
+        let ndotl = max(dot(normal, light_dir), 0.0);
+        diffuse += ndotl * light_radiance;
 
         // Blinn-Phong
-        let ndoth = max(dot(in.normal, halfway_dir), 0.0);
+        let ndoth = max(dot(normal, halfway_dir), 0.0);
         let spec = pow(ndoth, (1.0 - roughness) * 128.0); // Higher exponent for smoother surfaces
-        specular += spec * light_color;
+        specular += spec * light_radiance;
     }
 
     // **Combine Diffuse and Specular with Material Properties**
