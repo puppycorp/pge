@@ -26,6 +26,16 @@ impl App for EditorCliApp {
 	) {
 		self.editor.on_mouse_input(window_id, event);
 	}
+
+	fn on_keyboard_input(
+		&mut self,
+		window_id: ArenaId<Window>,
+		key: KeyboardKey,
+		action: KeyAction,
+		_state: &mut State,
+	) {
+		self.editor.on_keyboard_input(window_id, key, action);
+	}
 }
 
 fn main() {

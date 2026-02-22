@@ -16,9 +16,25 @@ struct SceneViewer {
 	orbit_controller: OrbitController,
 	right_button_down: bool,
 	middle_button_down: bool,
+	command_down: bool,
+	meta_down: bool,
+	control_down: bool,
+	move_left: bool,
+	move_right: bool,
+	move_forward: bool,
+	move_backward: bool,
+	move_up: bool,
+	move_down: bool,
+	rotate_left: bool,
+	rotate_right: bool,
+	rotate_up: bool,
+	rotate_down: bool,
 }
 
 impl SceneViewer {
+	const KEYBOARD_MOVE_SPEED: f32 = 2.0;
+	const KEYBOARD_ORBIT_SPEED: f32 = 140.0;
+
 	fn new(state: &mut State, scene_id: ArenaId<Scene>, settings: &EditorSettings) -> Self {
 		if let Some(scale) = settings.scene_scale {
 			if let Some(scene) = state.scenes.get_mut(&scene_id) {
@@ -78,10 +94,25 @@ impl SceneViewer {
 			orbit_controller,
 			right_button_down: false,
 			middle_button_down: false,
+			command_down: false,
+			meta_down: false,
+			control_down: false,
+			move_left: false,
+			move_right: false,
+			move_forward: false,
+			move_backward: false,
+			move_up: false,
+			move_down: false,
+			rotate_left: false,
+			rotate_right: false,
+			rotate_up: false,
+			rotate_down: false,
 		}
 	}
 
 	fn on_process(&mut self, state: &mut State, dt: f32) {
+		self.apply_keyboard_move(dt);
+		self.apply_keyboard_rotate(dt);
 		self.orbit_controller
 			.process(state, self.camera_node_id, dt);
 	}
@@ -115,6 +146,119 @@ impl SceneViewer {
 			MouseEvent::Wheel { dx: _, dy } => {
 				self.orbit_controller.zoom(dy);
 			}
+		}
+	}
+
+	fn on_keyboard_input(&mut self, key: KeyboardKey, action: KeyAction) {
+		let pressed = matches!(action, KeyAction::Pressed);
+		match key {
+			KeyboardKey::MetaLeft | KeyboardKey::MetaRight => {
+				self.meta_down = pressed;
+				self.command_down = self.meta_down || self.control_down;
+			}
+			KeyboardKey::ControlLeft => {
+				self.control_down = pressed;
+				self.command_down = self.meta_down || self.control_down;
+				self.move_down = pressed;
+			}
+			KeyboardKey::Equal | KeyboardKey::NumpadAdd => {
+				if pressed && self.command_down {
+					self.orbit_controller.zoom(1.0);
+				}
+			}
+			KeyboardKey::Minus | KeyboardKey::NumpadSubtract => {
+				if pressed && self.command_down {
+					self.orbit_controller.zoom(-1.0);
+				}
+			}
+			KeyboardKey::A => {
+				self.move_left = pressed;
+			}
+			KeyboardKey::D => {
+				self.move_right = pressed;
+			}
+			KeyboardKey::W => {
+				self.move_forward = pressed;
+			}
+			KeyboardKey::S => {
+				self.move_backward = pressed;
+			}
+			KeyboardKey::Space => {
+				self.move_up = pressed;
+			}
+			KeyboardKey::Left => {
+				self.rotate_left = pressed;
+			}
+			KeyboardKey::Right => {
+				self.rotate_right = pressed;
+			}
+			KeyboardKey::Up => {
+				self.rotate_up = pressed;
+			}
+			KeyboardKey::Down => {
+				self.rotate_down = pressed;
+			}
+			_ => {}
+		}
+	}
+
+	fn apply_keyboard_move(&mut self, dt: f32) {
+		let mut movement = Vec2::ZERO;
+		let mut vertical = 0.0;
+		if self.move_left {
+			movement.x -= 1.0;
+		}
+		if self.move_right {
+			movement.x += 1.0;
+		}
+		if self.move_forward {
+			movement.y += 1.0;
+		}
+		if self.move_backward {
+			movement.y -= 1.0;
+		}
+		if self.move_up {
+			vertical += 1.0;
+		}
+		if self.move_down {
+			vertical -= 1.0;
+		}
+		if movement == Vec2::ZERO && vertical == 0.0 {
+			return;
+		}
+
+		let forward = self.orbit_controller.rotation * Vec3::Z;
+		let mut flat_forward = Vec3::new(forward.x, 0.0, forward.z);
+		if flat_forward.length_squared() <= f32::EPSILON {
+			flat_forward = Vec3::Z;
+		}
+		flat_forward = flat_forward.normalize();
+		let flat_right = Vec3::new(flat_forward.z, 0.0, -flat_forward.x);
+
+		let speed = Self::KEYBOARD_MOVE_SPEED * self.orbit_controller.distance.max(1.0);
+		let delta = (flat_right * movement.x + flat_forward * movement.y + Vec3::Y * vertical)
+			* speed
+			* dt;
+		self.orbit_controller.target += delta;
+	}
+
+	fn apply_keyboard_rotate(&mut self, dt: f32) {
+		let mut orbit = Vec2::ZERO;
+		if self.rotate_left {
+			orbit.x -= 1.0;
+		}
+		if self.rotate_right {
+			orbit.x += 1.0;
+		}
+		if self.rotate_up {
+			orbit.y -= 1.0;
+		}
+		if self.rotate_down {
+			orbit.y += 1.0;
+		}
+		if orbit != Vec2::ZERO {
+			self.orbit_controller
+				.orbit(orbit * Self::KEYBOARD_ORBIT_SPEED * dt);
 		}
 	}
 }
@@ -220,6 +364,18 @@ impl EditorPlugin {
 		};
 		scene_viewer.on_mouse_input(event);
 	}
+
+	pub fn on_keyboard_input(&mut self, window_id: ArenaId<Window>, key: KeyboardKey, action: KeyAction) {
+		let scene_viewer = match self
+			.scene_viewers
+			.iter_mut()
+			.find(|v| v.window_id == window_id)
+		{
+			Some(v) => v,
+			None => return,
+		};
+		scene_viewer.on_keyboard_input(key, action);
+	}
 }
 
 impl Default for EditorPlugin {
@@ -260,6 +416,7 @@ impl<T: App> App for EditorApp<T> {
 		state: &mut State,
 	) {
 		self.app.on_keyboard_input(window_id, key, action, state);
+		self.editor.on_keyboard_input(window_id, key, action);
 	}
 
 	fn on_mouse_input(&mut self, window_id: ArenaId<Window>, event: MouseEvent, state: &mut State) {

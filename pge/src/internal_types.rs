@@ -45,23 +45,15 @@ pub struct RawInstance {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct RawPointLight {
-    pub color: [f32; 3],    // 12 bytes
-    _padding1: f32,         // 4 bytes to align `intensity` to 16 bytes
-    pub intensity: f32,     // 4 bytes
-    _padding2: [f32; 3],    // 12 bytes to align `position` to 16 bytes
-    pub position: [f32; 3], // 12 bytes
-    _padding3: f32,         // 4 bytes to align the total size to 16 bytes
+    pub color_intensity: [f32; 4],
+    pub position: [f32; 4],
 }
 
 impl RawPointLight {
     pub fn new(color: [f32; 3], intensity: f32, position: [f32; 3]) -> Self {
         Self {
-            color,
-            intensity,
-            position,
-            _padding1: 0.0,
-            _padding2: [0.0; 3],
-            _padding3: 0.0,
+            color_intensity: [color[0], color[1], color[2], intensity],
+            position: [position[0], position[1], position[2], 0.0],
         }
     }
 }

@@ -42,6 +42,16 @@ impl pge::App for PuppyArmExample {
     ) {
         self.editor.on_mouse_input(_window_id, event.clone());
     }
+
+    fn on_keyboard_input(
+        &mut self,
+        window_id: ArenaId<Window>,
+        key: KeyboardKey,
+        action: KeyAction,
+        _state: &mut pge::State,
+    ) {
+        self.editor.on_keyboard_input(window_id, key, action);
+    }
 }
 
 fn main() {

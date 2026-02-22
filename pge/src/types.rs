@@ -36,7 +36,7 @@ pub enum MouseEvent {
 	Wheel { dx: f32, dy: f32 },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyboardKey {
 	Up,
 	Down,
@@ -60,6 +60,12 @@ pub enum KeyboardKey {
 	Digit4,
 	Digit5,
 	Digit6,
+	Equal,
+	Minus,
+	NumpadAdd,
+	NumpadSubtract,
+	MetaLeft,
+	MetaRight,
 	Unknow
 }
 
@@ -89,7 +95,7 @@ pub enum KeyboardKey {
 	}
 }*/
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum KeyAction {
 	Pressed,
 	Released

@@ -30,18 +30,13 @@ var<storage, read> camera: Camera;
 const MAX_POINT_LIGHTS: u32 = 16u;
 
 struct PointLight {
-	color: vec3<f32>,
-	// Padding to align to 16 bytes
-	_padding: f32, 
-	intensity: f32,
-	position: vec3<f32>,
-	// Padding to align to 16 bytes
-	_padding2: f32,
+	color_intensity: vec4<f32>,
+	position: vec4<f32>,
 };
 
 struct PointLightBuffer {
 	count: u32,
-	_padding: vec3<u32>,
+	_padding: array<u32, 3>,
 	lights: array<PointLight, MAX_POINT_LIGHTS>,
 };
 
@@ -119,11 +114,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	let point_light_count = min(point_lights.count, MAX_POINT_LIGHTS);
 	for (var i = 0u; i < point_light_count; i = i + 1u) {
 		let point_light = point_lights.lights[i];
-		let light_position = point_light.position;
+		let light_position = point_light.position.xyz;
+		let light_color = point_light.color_intensity.xyz;
+		let light_intensity = point_light.color_intensity.w;
 		let light_delta = light_position - in.world_position;
 		let light_dir = normalize(light_delta);
         let distance_sq = max(dot(light_delta, light_delta), 0.01);
-        let light_radiance = point_light.color * (point_light.intensity / distance_sq);
+		let light_radiance = light_color * (light_intensity / distance_sq);
         let halfway_dir = normalize(light_dir + view_dir);
 
         // Diffuse
