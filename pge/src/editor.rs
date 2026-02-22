@@ -13,18 +13,16 @@ pub struct EditorSettings {
 struct SceneViewer {
 	window_id: ArenaId<Window>,
 	camera_node_id: ArenaId<Node>,
-	orbit_controller: OrbitController,
+	free_fly_controller: FreeFlyController,
 	right_button_down: bool,
-	middle_button_down: bool,
-	command_down: bool,
-	meta_down: bool,
-	control_down: bool,
 	move_left: bool,
 	move_right: bool,
-	move_forward: bool,
+	move_forward_w: bool,
+	move_forward_f: bool,
 	move_backward: bool,
 	move_up: bool,
 	move_down: bool,
+	move_fast: bool,
 	rotate_left: bool,
 	rotate_right: bool,
 	rotate_up: bool,
@@ -32,9 +30,6 @@ struct SceneViewer {
 }
 
 impl SceneViewer {
-	const KEYBOARD_MOVE_SPEED: f32 = 2.0;
-	const KEYBOARD_ORBIT_SPEED: f32 = 140.0;
-
 	fn new(state: &mut State, scene_id: ArenaId<Scene>, settings: &EditorSettings) -> Self {
 		if let Some(scale) = settings.scene_scale {
 			if let Some(scene) = state.scenes.get_mut(&scene_id) {
@@ -85,24 +80,22 @@ impl SceneViewer {
 		let window = Window::new().title(&name).ui(ui_id);
 		let window_id = state.windows.insert(window);
 
-		let mut orbit_controller = OrbitController::default();
-		orbit_controller.set_from_target_and_position(center, camera_pos);
+		let mut free_fly_controller = FreeFlyController::default();
+		free_fly_controller.set_from_target_and_position(center, camera_pos);
 
 		Self {
 			window_id,
 			camera_node_id,
-			orbit_controller,
+			free_fly_controller,
 			right_button_down: false,
-			middle_button_down: false,
-			command_down: false,
-			meta_down: false,
-			control_down: false,
 			move_left: false,
 			move_right: false,
-			move_forward: false,
+			move_forward_w: false,
+			move_forward_f: false,
 			move_backward: false,
 			move_up: false,
 			move_down: false,
+			move_fast: false,
 			rotate_left: false,
 			rotate_right: false,
 			rotate_up: false,
@@ -113,63 +106,36 @@ impl SceneViewer {
 	fn on_process(&mut self, state: &mut State, dt: f32) {
 		self.apply_keyboard_move(dt);
 		self.apply_keyboard_rotate(dt);
-		self.orbit_controller
-			.process(state, self.camera_node_id, dt);
+		self.free_fly_controller
+			.apply_to_node(state, self.camera_node_id);
 	}
 
 	fn on_mouse_input(&mut self, event: MouseEvent) {
 		match event {
 			MouseEvent::Moved { dx, dy } => {
-				let delta = Vec2::new(dx, dy);
 				if self.right_button_down {
-					self.orbit_controller.orbit(delta);
-				} else if self.middle_button_down {
-					self.orbit_controller.pan(delta);
+					self.free_fly_controller.look_mouse(Vec2::new(dx, dy));
 				}
 			}
 			MouseEvent::Pressed { button } => {
 				if let MouseButton::Right = button {
 					self.right_button_down = true;
 				}
-				if let MouseButton::Middle = button {
-					self.middle_button_down = true;
-				}
 			}
 			MouseEvent::Released { button } => {
 				if let MouseButton::Right = button {
 					self.right_button_down = false;
 				}
-				if let MouseButton::Middle = button {
-					self.middle_button_down = false;
-				}
 			}
-			MouseEvent::Wheel { dx: _, dy } => {
-				self.orbit_controller.zoom(dy);
-			}
+			MouseEvent::Wheel { dx: _, dy: _ } => {}
 		}
 	}
 
 	fn on_keyboard_input(&mut self, key: KeyboardKey, action: KeyAction) {
 		let pressed = matches!(action, KeyAction::Pressed);
 		match key {
-			KeyboardKey::MetaLeft | KeyboardKey::MetaRight => {
-				self.meta_down = pressed;
-				self.command_down = self.meta_down || self.control_down;
-			}
 			KeyboardKey::ControlLeft => {
-				self.control_down = pressed;
-				self.command_down = self.meta_down || self.control_down;
 				self.move_down = pressed;
-			}
-			KeyboardKey::Equal | KeyboardKey::NumpadAdd => {
-				if pressed && self.command_down {
-					self.orbit_controller.zoom(1.0);
-				}
-			}
-			KeyboardKey::Minus | KeyboardKey::NumpadSubtract => {
-				if pressed && self.command_down {
-					self.orbit_controller.zoom(-1.0);
-				}
 			}
 			KeyboardKey::A => {
 				self.move_left = pressed;
@@ -178,13 +144,19 @@ impl SceneViewer {
 				self.move_right = pressed;
 			}
 			KeyboardKey::W => {
-				self.move_forward = pressed;
+				self.move_forward_w = pressed;
+			}
+			KeyboardKey::F => {
+				self.move_forward_f = pressed;
 			}
 			KeyboardKey::S => {
 				self.move_backward = pressed;
 			}
 			KeyboardKey::Space => {
 				self.move_up = pressed;
+			}
+			KeyboardKey::ShiftLeft => {
+				self.move_fast = pressed;
 			}
 			KeyboardKey::Left => {
 				self.rotate_left = pressed;
@@ -203,63 +175,45 @@ impl SceneViewer {
 	}
 
 	fn apply_keyboard_move(&mut self, dt: f32) {
-		let mut movement = Vec2::ZERO;
-		let mut vertical = 0.0;
+		let mut input = FreeFlyMoveInput::default();
 		if self.move_left {
-			movement.x -= 1.0;
+			input.right -= 1.0;
 		}
 		if self.move_right {
-			movement.x += 1.0;
+			input.right += 1.0;
 		}
-		if self.move_forward {
-			movement.y += 1.0;
+		if self.move_forward_w || self.move_forward_f {
+			input.forward += 1.0;
 		}
 		if self.move_backward {
-			movement.y -= 1.0;
+			input.forward -= 1.0;
 		}
 		if self.move_up {
-			vertical += 1.0;
+			input.up += 1.0;
 		}
 		if self.move_down {
-			vertical -= 1.0;
+			input.up -= 1.0;
 		}
-		if movement == Vec2::ZERO && vertical == 0.0 {
-			return;
-		}
-
-		let forward = self.orbit_controller.rotation * Vec3::Z;
-		let mut flat_forward = Vec3::new(forward.x, 0.0, forward.z);
-		if flat_forward.length_squared() <= f32::EPSILON {
-			flat_forward = Vec3::Z;
-		}
-		flat_forward = flat_forward.normalize();
-		let flat_right = Vec3::new(flat_forward.z, 0.0, -flat_forward.x);
-
-		let speed = Self::KEYBOARD_MOVE_SPEED * self.orbit_controller.distance.max(1.0);
-		let delta = (flat_right * movement.x + flat_forward * movement.y + Vec3::Y * vertical)
-			* speed
-			* dt;
-		self.orbit_controller.target += delta;
+		input.fast = self.move_fast;
+		self.free_fly_controller.move_local(input, dt);
 	}
 
 	fn apply_keyboard_rotate(&mut self, dt: f32) {
-		let mut orbit = Vec2::ZERO;
+		let mut yaw = 0.0;
+		let mut pitch = 0.0;
 		if self.rotate_left {
-			orbit.x -= 1.0;
+			yaw -= 1.0;
 		}
 		if self.rotate_right {
-			orbit.x += 1.0;
+			yaw += 1.0;
 		}
 		if self.rotate_up {
-			orbit.y -= 1.0;
+			pitch -= 1.0;
 		}
 		if self.rotate_down {
-			orbit.y += 1.0;
+			pitch += 1.0;
 		}
-		if orbit != Vec2::ZERO {
-			self.orbit_controller
-				.orbit(orbit * Self::KEYBOARD_ORBIT_SPEED * dt);
-		}
+		self.free_fly_controller.look_keyboard(yaw, pitch, dt);
 	}
 }
 
