@@ -128,8 +128,10 @@ where
         let normal_buffer = Buffer::new(hardware.create_buffer("normals", 1000));
         let index_buffer = Buffer::new(hardware.create_buffer("indices", 1000));
 
-        let default_point_lights =
+        let mut default_point_lights =
             Buffer::new(hardware.create_buffer("default_point_lights", 1000));
+        default_point_lights.write(bytemuck::bytes_of(&RawPointLightBuffer::default()));
+        default_point_lights.flush(&mut hardware);
 
         let default_material_data = RawMaterial::default();
         let default_material = hardware.create_buffer("default_material", 1000);
@@ -473,13 +475,22 @@ where
                 .push(RawPointLight::new(light.color, light.intensity, pos));
         }
 
-        for (scene_id, scene_lights) in scene_light_map {
-            let mut scene_light_buffer = RawPointLightBuffer::default();
-            let count = std::cmp::min(scene_lights.len(), MAX_POINT_LIGHTS);
-            for i in 0..count {
-                scene_light_buffer.lights[i] = scene_lights[i];
+        let mut scene_ids: Vec<ArenaId<Scene>> = scene_light_map.keys().copied().collect();
+        for scene_id in self.point_light_buffers.keys().copied() {
+            if !scene_light_map.contains_key(&scene_id) {
+                scene_ids.push(scene_id);
             }
-            scene_light_buffer.count = count as u32;
+        }
+
+        for scene_id in scene_ids {
+            let mut scene_light_buffer = RawPointLightBuffer::default();
+            if let Some(scene_lights) = scene_light_map.get(&scene_id) {
+                let count = std::cmp::min(scene_lights.len(), MAX_POINT_LIGHTS);
+                for i in 0..count {
+                    scene_light_buffer.lights[i] = scene_lights[i];
+                }
+                scene_light_buffer.count = count as u32;
+            }
 
             self.point_light_buffers
                 .entry(scene_id)

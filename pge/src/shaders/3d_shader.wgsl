@@ -58,13 +58,21 @@ fn vs_main(input: VertexInput, instance: InstanceInput) -> VertexOutput {
         instance.model_matrix_2,
         instance.model_matrix_3,
     );
+	let c0 = instance.model_matrix_0.xyz;
+	let c1 = instance.model_matrix_1.xyz;
+	let c2 = instance.model_matrix_2.xyz;
+	let normal_matrix = mat3x3<f32>(
+		cross(c1, c2),
+		cross(c2, c0),
+		cross(c0, c1),
+	);
 
     var out: VertexOutput;
     let world_position = (instance_model * vec4<f32>(input.position, 1.0)).xyz;
     out.clip_position = camera.model * vec4<f32>(world_position, 1.0);
     out.color = vec3(1.0, 0.0, 0.0); // Placeholder for color, to be modified by lighting calculation
     out.world_position = world_position;
-	let normal = normalize((instance_model * vec4<f32>(input.normal, 0.0)).xyz);
+	let normal = normalize(normal_matrix * input.normal);
 	out.normal = normal;
 	out.tex_coords = input.tex_coords;
     return out;
@@ -102,13 +110,13 @@ var<storage, read> material: Material;
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let view_dir = normalize(camera.position - in.world_position);
     let normal = normalize(in.normal);
-    let ambient = 0.15;
+    let ambient = 0.05;
     var diffuse = vec3<f32>(ambient, ambient, ambient);
     var specular = vec3<f32>(0.0, 0.0, 0.0);
 
     let texture_color = textureSample(base_color_texture, base_color_sampler, in.tex_coords);
     let base_color = texture_color.rgb * material.base_color_factor.rgb;
-    let roughness = material.roughness_factor;
+    let roughness = clamp(material.roughness_factor, 0.04, 1.0);
     let metallic = material.metallic_factor;
 
 	let point_light_count = min(point_lights.count, MAX_POINT_LIGHTS);
@@ -120,7 +128,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 		let light_delta = light_position - in.world_position;
 		let light_dir = normalize(light_delta);
         let distance_sq = max(dot(light_delta, light_delta), 0.01);
-		let light_radiance = light_color * (light_intensity / distance_sq);
+		let light_radiance = light_color * light_intensity * (1.0 / distance_sq);
         let halfway_dir = normalize(light_dir + view_dir);
 
         // Diffuse

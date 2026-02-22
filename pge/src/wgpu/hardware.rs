@@ -1389,10 +1389,10 @@ fn screenshot_dir_from_env() -> Option<PathBuf> {
         return None;
     }
     let dir = match env::current_dir() {
-        Ok(dir) => dir.join("workdir").join("screenshot"),
+        Ok(dir) => dir.join("workdir").join("screenshots"),
         Err(err) => {
             log::error!("Failed to read current dir for screenshots: {:?}", err);
-            PathBuf::from("workdir").join("screenshot")
+            PathBuf::from("workdir").join("screenshots")
         }
     };
     if let Err(err) = fs::create_dir_all(&dir) {
