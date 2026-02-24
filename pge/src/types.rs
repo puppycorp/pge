@@ -693,7 +693,7 @@ impl Camera {
 
 	pub fn view_rect(&self, transform: glam::Mat4) -> AABB {
 		let fov_radians = self.fovy.to_radians();
-		let distance = (self.zfar / 2.0) / fov_radians.tan();
+		let distance = (self.zfar / 2.0) / (fov_radians * 0.5).tan();
 		AABB {
 			min: (transform * glam::Vec4::new(-distance, -distance, self.znear, 1.0)).truncate(),
 			max: (transform * glam::Vec4::new(distance, distance, self.zfar, 1.0)).truncate(),

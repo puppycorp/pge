@@ -13,8 +13,11 @@ pub struct EditorSettings {
 struct SceneViewer {
 	window_id: ArenaId<Window>,
 	camera_node_id: ArenaId<Node>,
+	orbit_controller: OrbitController,
 	free_fly_controller: FreeFlyController,
 	right_button_down: bool,
+	middle_button_down: bool,
+	rebind_free_fly: bool,
 	move_left: bool,
 	move_right: bool,
 	move_forward_w: bool,
@@ -37,16 +40,6 @@ impl SceneViewer {
 			}
 		}
 
-		if settings.add_light {
-			let mut light_node = Node::new();
-			light_node.parent = NodeParent::Scene(scene_id);
-			light_node.translation = Vec3::new(0.0, 5.0, -5.0);
-			let light_node_id = state.nodes.insert(light_node);
-			let mut light = PointLight::new();
-			light.node_id = Some(light_node_id);
-			state.point_lights.insert(light);
-		}
-
 		let scene_bounding_box = state.get_scene_bounding_box(scene_id);
 		let center = (scene_bounding_box.min + scene_bounding_box.max) * 0.5;
 		let size = scene_bounding_box.max - scene_bounding_box.min;
@@ -55,10 +48,23 @@ impl SceneViewer {
 		let fov_degrees = 60.0_f32;
 		let fov_radians = fov_degrees.to_radians();
 		let distance = if max_size > 0.0 {
-			(max_size / 2.0) / fov_radians.tan()
+			(max_size / 2.0) / (fov_radians * 0.5).tan()
 		} else {
 			3.0
 		};
+
+		if settings.add_light {
+			let light_distance = (distance * 1.4).max(0.1);
+			let light_intensity = 2.2 * light_distance * light_distance;
+			let mut light_node = Node::new();
+			light_node.parent = NodeParent::Scene(scene_id);
+			light_node.translation = center + Vec3::new(0.0, light_distance * 0.5, -light_distance * 0.5);
+			let light_node_id = state.nodes.insert(light_node);
+			let mut light = PointLight::new();
+			light.intensity = light_intensity;
+			light.node_id = Some(light_node_id);
+			state.point_lights.insert(light);
+		}
 
 		let camera_pos = center + Vec3::new(0.0, 0.0, distance.max(0.1));
 		let mut camera_node = Node::new();
@@ -82,12 +88,17 @@ impl SceneViewer {
 
 		let mut free_fly_controller = FreeFlyController::default();
 		free_fly_controller.set_from_target_and_position(center, camera_pos);
+		let mut orbit_controller = OrbitController::default();
+		orbit_controller.set_from_target_and_position(center, camera_pos);
 
 		Self {
 			window_id,
 			camera_node_id,
+			orbit_controller,
 			free_fly_controller,
+			rebind_free_fly: false,
 			right_button_down: false,
+			middle_button_down: false,
 			move_left: false,
 			move_right: false,
 			move_forward_w: false,
@@ -104,30 +115,95 @@ impl SceneViewer {
 	}
 
 	fn on_process(&mut self, state: &mut State, dt: f32) {
-		self.apply_keyboard_move(dt);
-		self.apply_keyboard_rotate(dt);
-		self.free_fly_controller
-			.apply_to_node(state, self.camera_node_id);
+		let (camera_position, camera_rotation) = match state.nodes.get(&self.camera_node_id) {
+			Some(camera_node) => (camera_node.translation, camera_node.rotation),
+			None => return,
+		};
+
+		let orbit_controls_active = self.right_button_down || self.middle_button_down;
+		if orbit_controls_active {
+			if self.rebind_free_fly {
+				self.orbit_controller
+					.set_from_target_and_position(
+						camera_position + camera_rotation * Vec3::Z * self.orbit_controller.distance,
+						camera_position,
+					);
+				self.rebind_free_fly = false;
+			}
+			self.orbit_controller.process(state, self.camera_node_id, dt);
+			self.rebind_free_fly = true;
+			return;
+		}
+
+		if self.rebind_free_fly {
+			self.free_fly_controller
+				.set_from_transform(camera_position, camera_rotation);
+			self.rebind_free_fly = false;
+		}
+
+		let moving_camera = self.move_left
+			|| self.move_right
+			|| self.move_forward_w
+			|| self.move_forward_f
+			|| self.move_backward
+			|| self.move_up
+			|| self.move_down;
+
+		let rotating_camera = self.rotate_left
+			|| self.rotate_right
+			|| self.rotate_up
+			|| self.rotate_down;
+		if rotating_camera {
+			self.apply_keyboard_rotate(dt);
+		}
+		if moving_camera {
+			self.apply_keyboard_move(dt);
+		}
+		self.free_fly_controller.apply_to_node(state, self.camera_node_id);
 	}
 
 	fn on_mouse_input(&mut self, event: MouseEvent) {
 		match event {
 			MouseEvent::Moved { dx, dy } => {
 				if self.right_button_down {
-					self.free_fly_controller.look_mouse(Vec2::new(dx, dy));
+					self.orbit_controller.orbit(Vec2::new(dx, dy));
+				} else if self.middle_button_down {
+					self.orbit_controller.pan(Vec2::new(dx, dy));
+				}
+				if self.right_button_down || self.middle_button_down {
+					self.rebind_free_fly = true;
 				}
 			}
+			MouseEvent::Wheel { dx: _, dy } => {
+				self.orbit_controller.zoom(dy);
+				self.rebind_free_fly = true;
+			}
 			MouseEvent::Pressed { button } => {
-				if let MouseButton::Right = button {
-					self.right_button_down = true;
+				match button {
+					MouseButton::Right => {
+						self.right_button_down = true;
+						self.rebind_free_fly = true;
+					}
+					MouseButton::Middle => {
+						self.middle_button_down = true;
+						self.rebind_free_fly = true;
+					}
+					_ => {}
 				}
 			}
 			MouseEvent::Released { button } => {
-				if let MouseButton::Right = button {
-					self.right_button_down = false;
+				match button {
+					MouseButton::Right => {
+						self.right_button_down = false;
+						self.rebind_free_fly = true;
+					}
+					MouseButton::Middle => {
+						self.middle_button_down = false;
+						self.rebind_free_fly = true;
+					}
+					_ => {}
 				}
 			}
-			MouseEvent::Wheel { dx: _, dy: _ } => {}
 		}
 	}
 

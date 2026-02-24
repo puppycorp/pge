@@ -96,6 +96,7 @@ struct Bullet {
 pub struct FpsShooter {
 	physics: PhysicsWorld,
 	sensitivity: f32,
+	right_button_down: bool,
 	player_id: Option<ArenaId<Node>>,
 	light_inx: Option<ArenaId<Node>>,
 	light_circle_i: f32,
@@ -131,6 +132,7 @@ impl FpsShooter {
 
 		Self {
 			physics: PhysicsWorld::new(),
+			right_button_down: false,
 			player_id: None,
 			light_inx: None,
 			sensitivity: 0.001,
@@ -548,9 +550,12 @@ impl pge::App for FpsShooter {
 		// player.physics.force = player.rotation * dir * 300.0;
 	}
 
-	fn on_mouse_input(&mut self, window_id: ArenaId<Window>, event: MouseEvent, state: &mut State) {
+	fn on_mouse_input(&mut self, _window_id: ArenaId<Window>, event: MouseEvent, state: &mut State) {
 		match event {
 			MouseEvent::Moved { dx, dy } => {
+				if !self.right_button_down {
+					return;
+				}
 				let player_inx = match self.player_id {
 					Some(index) => index,
 					None => {
@@ -590,6 +595,7 @@ impl pge::App for FpsShooter {
 							self.shooting = true;
 						}
 					},
+					MouseButton::Right => self.right_button_down = true,
 					_ => {}
 				}
 			},
@@ -598,6 +604,7 @@ impl pge::App for FpsShooter {
 					MouseButton::Left => {
 						self.shooting = false;
 					},
+					MouseButton::Right => self.right_button_down = false,
 					_ => {}
 				}
 			},

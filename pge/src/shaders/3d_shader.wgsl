@@ -110,7 +110,7 @@ var<storage, read> material: Material;
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let view_dir = normalize(camera.position - in.world_position);
     let normal = normalize(in.normal);
-    let ambient = 0.05;
+    let ambient = 0.08;
     var diffuse = vec3<f32>(ambient, ambient, ambient);
     var specular = vec3<f32>(0.0, 0.0, 0.0);
 

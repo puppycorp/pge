@@ -26,6 +26,8 @@ pub fn orbit_state_from_offset(offset: Vec3) -> (f32, f32, f32) {
 #[derive(Debug, Clone)]
 pub struct OrbitController {
 	pub target: Vec3,
+	pub yaw: f32,
+	pub pitch: f32,
 	pub rotation: Quat,
 	pub distance: f32,
 	pub rot_speed: f32,
@@ -42,6 +44,8 @@ impl Default for OrbitController {
 	fn default() -> Self {
 		Self {
 			target: Vec3::ZERO,
+			yaw: 0.0,
+			pitch: 0.0,
 			rotation: Quat::IDENTITY,
 			distance: 3.0,
 			rot_speed: 0.01,
@@ -60,21 +64,11 @@ impl OrbitController {
 	pub fn set_from_target_and_position(&mut self, target: Vec3, position: Vec3) {
 		self.target = target;
 		let offset = position - target;
-		self.distance = offset.length().max(self.min_dist);
-
-		let forward = (target - position).normalize_or_zero();
-		let world_up = Vec3::Y;
-
-		let mut right = world_up.cross(forward);
-		if right.length_squared() < 1e-8 {
-			right = Vec3::X;
-		} else {
-			right = right.normalize();
-		}
-		let up = forward.cross(right).normalize_or_zero();
-
-		let m = Mat3::from_cols(right, up, forward);
-		self.rotation = Quat::from_mat3(&m).normalize();
+		let (yaw, pitch, distance) = orbit_state_from_offset(offset);
+		self.yaw = yaw;
+		self.pitch = pitch;
+		self.distance = distance.max(self.min_dist);
+		self.rotation = Quat::from_euler(EulerRot::YXZ, self.yaw, self.pitch, 0.0);
 	}
 
 	pub fn orbit(&mut self, mouse_delta: Vec2) {
@@ -93,13 +87,12 @@ impl OrbitController {
 		if self.orbit_delta != Vec2::ZERO {
 			let yaw_delta = self.orbit_delta.x * self.rot_speed;
 			let pitch_delta = self.orbit_delta.y * self.rot_speed;
-
-			let right = (self.rotation * Vec3::X).normalize_or_zero();
-			let up = (self.rotation * Vec3::Y).normalize_or_zero();
-
-			let q_yaw = Quat::from_axis_angle(up, yaw_delta);
-			let q_pitch = Quat::from_axis_angle(right, pitch_delta);
-			self.rotation = (q_pitch * q_yaw * self.rotation).normalize();
+			self.yaw += yaw_delta;
+			let mut pitch = self.pitch + pitch_delta;
+			const MAX_PITCH: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
+			pitch = pitch.clamp(-MAX_PITCH, MAX_PITCH);
+			self.pitch = pitch;
+			self.rotation = Quat::from_euler(EulerRot::YXZ, self.yaw, self.pitch, 0.0);
 
 			crate::log2!("Orbit: delta {:?}", self.orbit_delta);
 			self.orbit_delta = Vec2::ZERO;

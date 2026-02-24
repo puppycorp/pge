@@ -44,6 +44,13 @@ impl Default for FreeFlyController {
 }
 
 impl FreeFlyController {
+	pub fn set_from_transform(&mut self, position: Vec3, rotation: Quat) {
+		self.position = position;
+		let forward = (rotation * Vec3::Z).normalize_or_zero();
+		self.yaw = forward.x.atan2(forward.z);
+		self.pitch = forward.y.clamp(-1.0, 1.0).asin();
+	}
+
 	pub fn set_from_target_and_position(&mut self, target: Vec3, position: Vec3) {
 		self.position = position;
 		let mut forward = (target - position).normalize_or_zero();
