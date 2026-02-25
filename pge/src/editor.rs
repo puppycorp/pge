@@ -120,9 +120,12 @@ impl SceneViewer {
 			None => return,
 		};
 
-		let orbit_controls_active = self.right_button_down || self.middle_button_down;
+		let orbit_button_down = self.right_button_down || self.middle_button_down;
+		let orbit_controls_active = orbit_button_down || self.orbit_controller.has_pending_input();
 		if orbit_controls_active {
-			if self.rebind_free_fly {
+			let rebind_orbit = self.rebind_free_fly
+				&& (orbit_button_down || self.orbit_controller.has_pending_zoom());
+			if rebind_orbit {
 				self.orbit_controller
 					.set_from_target_and_position(
 						camera_position + camera_rotation * Vec3::Z * self.orbit_controller.distance,
@@ -131,7 +134,7 @@ impl SceneViewer {
 				self.rebind_free_fly = false;
 			}
 			self.orbit_controller.process(state, self.camera_node_id, dt);
-			self.rebind_free_fly = true;
+			self.rebind_free_fly = !orbit_button_down;
 			return;
 		}
 
@@ -153,6 +156,9 @@ impl SceneViewer {
 			|| self.rotate_right
 			|| self.rotate_up
 			|| self.rotate_down;
+		if !moving_camera && !rotating_camera {
+			return;
+		}
 		if rotating_camera {
 			self.apply_keyboard_rotate(dt);
 		}
@@ -195,10 +201,12 @@ impl SceneViewer {
 				match button {
 					MouseButton::Right => {
 						self.right_button_down = false;
+						self.orbit_controller.clear_drag_input();
 						self.rebind_free_fly = true;
 					}
 					MouseButton::Middle => {
 						self.middle_button_down = false;
+						self.orbit_controller.clear_drag_input();
 						self.rebind_free_fly = true;
 					}
 					_ => {}
@@ -248,6 +256,25 @@ impl SceneViewer {
 			}
 			_ => {}
 		}
+	}
+
+	fn on_focus_lost(&mut self) {
+		self.move_left = false;
+		self.move_right = false;
+		self.move_forward_w = false;
+		self.move_forward_f = false;
+		self.move_backward = false;
+		self.move_up = false;
+		self.move_down = false;
+		self.move_fast = false;
+		self.rotate_left = false;
+		self.rotate_right = false;
+		self.rotate_up = false;
+		self.rotate_down = false;
+		self.right_button_down = false;
+		self.middle_button_down = false;
+		self.orbit_controller.clear_input();
+		self.rebind_free_fly = true;
 	}
 
 	fn apply_keyboard_move(&mut self, dt: f32) {
@@ -406,6 +433,15 @@ impl EditorPlugin {
 		};
 		scene_viewer.on_keyboard_input(key, action);
 	}
+
+	pub fn on_focus_lost(&mut self, window_id: ArenaId<Window>) {
+		for scene_viewer in &mut self.scene_viewers {
+			if scene_viewer.window_id != window_id {
+				continue;
+			}
+			scene_viewer.on_focus_lost();
+		}
+	}
 }
 
 impl Default for EditorPlugin {
@@ -452,6 +488,11 @@ impl<T: App> App for EditorApp<T> {
 	fn on_mouse_input(&mut self, window_id: ArenaId<Window>, event: MouseEvent, state: &mut State) {
 		self.app.on_mouse_input(window_id, event.clone(), state);
 		self.editor.on_mouse_input(window_id, event);
+	}
+
+	fn on_focus_lost(&mut self, window_id: ArenaId<Window>, state: &mut State) {
+		self.app.on_focus_lost(window_id, state);
+		self.editor.on_focus_lost(window_id);
 	}
 
 	fn on_process(&mut self, state: &mut State, delta: f32) {

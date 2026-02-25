@@ -895,6 +895,7 @@ pub trait App<E = ()> {
 	fn on_create(&mut self, state: &mut State) {}
 	fn on_keyboard_input(&mut self, window_id: ArenaId<Window>, key: KeyboardKey, action: KeyAction, state: &mut State) {}
 	fn on_mouse_input(&mut self, window_id: ArenaId<Window>, event: MouseEvent, state: &mut State) {}
+	fn on_focus_lost(&mut self, window_id: ArenaId<Window>, state: &mut State) {}
 	fn on_event(&mut self, _event: E, _state: &mut State) {}
 	/// Run before rendering
 	fn on_process(&mut self, state: &mut State, delta: f32) {}

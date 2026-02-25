@@ -9,7 +9,7 @@ pub fn orbit_offset(yaw: f32, pitch: f32, radius: f32) -> Vec3 {
 	let cp = pitch.cos();
 	let sp = pitch.sin();
 
-	Vec3::new(radius * sy * cp, radius * sp, radius * cy * cp)
+	Vec3::new(-radius * sy * cp, radius * sp, -radius * cy * cp)
 }
 
 pub fn orbit_state_from_offset(offset: Vec3) -> (f32, f32, f32) {
@@ -18,7 +18,7 @@ pub fn orbit_state_from_offset(offset: Vec3) -> (f32, f32, f32) {
 		return (0.0, 0.0, 0.0);
 	}
 
-	let yaw = offset.x.atan2(offset.z);
+	let yaw = (-offset.x).atan2(-offset.z);
 	let pitch = (offset.y / radius).clamp(-1.0, 1.0).asin();
 	(yaw, pitch, radius)
 }
@@ -61,6 +61,27 @@ impl Default for OrbitController {
 }
 
 impl OrbitController {
+	pub fn clear_input(&mut self) {
+		self.orbit_delta = Vec2::ZERO;
+		self.pan_delta = Vec2::ZERO;
+		self.zoom_delta = 0.0;
+	}
+
+	pub fn clear_drag_input(&mut self) {
+		self.orbit_delta = Vec2::ZERO;
+		self.pan_delta = Vec2::ZERO;
+	}
+
+	pub fn has_pending_input(&self) -> bool {
+		self.orbit_delta != Vec2::ZERO
+			|| self.pan_delta != Vec2::ZERO
+			|| self.zoom_delta != 0.0
+	}
+
+	pub fn has_pending_zoom(&self) -> bool {
+		self.zoom_delta != 0.0
+	}
+
 	pub fn set_from_target_and_position(&mut self, target: Vec3, position: Vec3) {
 		self.target = target;
 		let offset = position - target;
@@ -80,6 +101,10 @@ impl OrbitController {
 	}
 
 	pub fn zoom(&mut self, scroll_y: f32) {
+		let scroll_y = scroll_y.clamp(-10.0, 10.0);
+		if scroll_y.abs() < 0.01 {
+			return;
+		}
 		self.zoom_delta += scroll_y;
 	}
 
@@ -218,6 +243,24 @@ mod tests {
 		assert_vec3_approx_eq(camera_node.translation, expected_pos, 1e-4);
 
 		let expected_forward = (controller.target - camera_node.translation).normalize_or_zero();
+		let node_forward = camera_node.rotation * Vec3::Z;
+		assert_vec3_approx_eq(node_forward, expected_forward, 1e-4);
+	}
+
+	#[test]
+	fn set_from_target_and_position_preserves_pose() {
+		let mut state = State::default();
+		let camera_node_id = state.nodes.insert(Node::default());
+		let mut controller = OrbitController::default();
+		let target = Vec3::new(0.5, 1.2, -2.0);
+		let position = Vec3::new(3.0, 4.0, 5.0);
+
+		controller.set_from_target_and_position(target, position);
+		controller.process(&mut state, camera_node_id, 0.0);
+
+		let camera_node = state.nodes.get(&camera_node_id).unwrap();
+		assert_vec3_approx_eq(camera_node.translation, position, 1e-4);
+		let expected_forward = (target - position).normalize_or_zero();
 		let node_forward = camera_node.rotation * Vec3::Z;
 		assert_vec3_approx_eq(node_forward, expected_forward, 1e-4);
 	}

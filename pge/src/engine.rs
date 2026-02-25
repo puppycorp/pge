@@ -656,6 +656,15 @@ where
             .on_keyboard_input(window_ctx.window_id, key, action, &mut self.state);
     }
 
+    pub fn on_focus_lost(&mut self, window: WindowHandle) {
+        let window_ctx = match self.windows.iter().find(|w| w.window == window) {
+            Some(w) => w,
+            None => return,
+        };
+        self.app
+            .on_focus_lost(window_ctx.window_id, &mut self.state);
+    }
+
     pub fn on_resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;

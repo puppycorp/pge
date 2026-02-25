@@ -92,6 +92,8 @@ struct WindowContext<'a> {
     lock_cursor: bool,
     last_cursor_pos: Option<PhysicalPosition<f64>>,
     surface_format: Option<wgpu::TextureFormat>,
+    has_focus: bool,
+    is_visible: bool,
 }
 
 struct PipelineContext {
@@ -304,6 +306,8 @@ where
                 }
                 let wininit_window = event_loop.create_window(window_attributes).unwrap();
                 let wininit_window = Arc::new(wininit_window);
+                let has_focus = wininit_window.has_focus();
+                let is_visible = wininit_window.is_visible().unwrap_or(true);
                 let surface = Arc::new(
                     self.instance
                         .create_surface(wininit_window.clone())
@@ -318,6 +322,8 @@ where
                     lock_cursor: args.lock_cursor,
                     last_cursor_pos: None,
                     surface_format: None,
+                    has_focus,
+                    is_visible,
                 };
                 self.windows.push(window_ctx);
             }
@@ -1037,6 +1043,24 @@ where
 
     fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         self.drain_app_events();
+        let mut unfocused_windows = Vec::new();
+        for window_ctx in &mut self.windows {
+            let has_focus = window_ctx.wininit_window.has_focus();
+            let is_visible = window_ctx.wininit_window.is_visible().unwrap_or(true);
+            if (window_ctx.has_focus && !has_focus) || (window_ctx.is_visible && !is_visible) {
+                unfocused_windows.push(window_ctx.window_id);
+            }
+            window_ctx.has_focus = has_focus;
+            window_ctx.is_visible = is_visible;
+        }
+        for window_id in unfocused_windows {
+            if let Some(window_ctx) = self.windows.iter_mut().find(|window| window.window_id == window_id) {
+                window_ctx.last_cursor_pos = None;
+                window_ctx.wininit_window.set_cursor_visible(true);
+            }
+            self.engine.on_focus_lost(WindowHandle { id: window_id });
+        }
+
         let dt = self.last_on_process_time.elapsed().as_secs_f32();
         if dt < 0.016 {
             return;
@@ -1105,6 +1129,30 @@ where
                 crate::log1!("Exiting: window close requested.");
                 self.log_exit_stats();
                 event_loop.exit();
+            }
+            WindowEvent::Focused(false) => {
+                if window_ctx.has_focus {
+                    self.engine.on_focus_lost(WindowHandle {
+                        id: window_ctx.window_id,
+                    });
+                }
+                window_ctx.has_focus = false;
+                window_ctx.last_cursor_pos = None;
+                window_ctx.wininit_window.set_cursor_visible(true);
+            }
+            WindowEvent::Focused(true) => {
+                window_ctx.has_focus = true;
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                if !modifiers.state().control_key() {
+                    self.engine.on_keyboard_input(
+                        WindowHandle {
+                            id: window_ctx.window_id,
+                        },
+                        KeyboardKey::ControlLeft,
+                        KeyAction::Released,
+                    );
+                }
             }
             WindowEvent::RedrawRequested => {}
             WindowEvent::CursorMoved {
@@ -1238,11 +1286,7 @@ where
                     }
                 }
             },
-            WindowEvent::MouseWheel {
-                device_id,
-                delta,
-                phase,
-            } => {
+            WindowEvent::MouseWheel { delta, .. } => {
                 crate::log2!("scroll delta: {:?}", delta);
                 match delta {
                     MouseScrollDelta::LineDelta(dx, dy) => {
@@ -1254,7 +1298,25 @@ where
                             event,
                         );
                     }
-                    _ => {}
+                    MouseScrollDelta::PixelDelta(position) => {
+                        // Trackpads report pixel deltas; normalize to "line-like" units.
+                        // 16px per line matches typical UI scrolling behavior and avoids tiny no-op deltas.
+                        let dx = (position.x as f32 / 16.0).clamp(-10.0, 10.0);
+                        let dy = (position.y as f32 / 16.0).clamp(-10.0, 10.0);
+                        if dx.abs() < 0.01 && dy.abs() < 0.01 {
+                            return;
+                        }
+                        let event = MouseEvent::Wheel {
+                            dx,
+                            dy,
+                        };
+                        self.engine.on_mouse_input(
+                            WindowHandle {
+                                id: window_ctx.window_id,
+                            },
+                            event,
+                        );
+                    }
                 }
             }
             _ => {}
