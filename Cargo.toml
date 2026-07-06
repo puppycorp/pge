@@ -1,3 +1,11 @@
 [workspace]
-members = ["pge", "editor", "examples/*"]
+members = [
+    "pge-core",
+    "pge-physics",
+    "pge-renderer",
+    "pge-app",
+    "pge",
+    "editor",
+    "examples/*",
+]
 resolver = "2"

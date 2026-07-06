@@ -2101,6 +2101,10 @@ dependencies = [
  "image",
  "log",
  "lyon",
+ "pge-app",
+ "pge-core",
+ "pge-physics",
+ "pge-renderer",
  "rand",
  "serde",
  "serde_json",
@@ -2109,6 +2113,35 @@ dependencies = [
  "urdf-rs",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "pge-app"
+version = "0.1.0"
+dependencies = [
+ "pge-core",
+]
+
+[[package]]
+name = "pge-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "pge-physics"
+version = "0.1.0"
+dependencies = [
+ "pge-core",
+]
+
+[[package]]
+name = "pge-renderer"
+version = "0.1.0"
+dependencies = [
+ "pge-core",
+ "serde",
 ]
 
 [[package]]

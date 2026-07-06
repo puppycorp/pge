@@ -6,6 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+pge-core = { path = "../pge-core" }
+pge-physics = { path = "../pge-physics" }
+pge-renderer = { path = "../pge-renderer" }
+pge-app = { path = "../pge-app" }
 log = "0.4"
 winit = { version = "0.30", optional = true }
 wgpu = { version = "0.20", optional = true }

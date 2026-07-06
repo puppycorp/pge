@@ -1,0 +1,8 @@
+[package]
+name = "pge-renderer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pge-core = { path = "../pge-core" }
+serde = { version = "1.0", features = ["derive"] }
