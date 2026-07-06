@@ -76,6 +76,13 @@ struct RenderObject {
     color: [f32; 4],
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WgpuRgbaFrame {
+    pub width: u32,
+    pub height: u32,
+    pub bytes: Vec<u8>,
+}
+
 struct DrawItem {
     mesh_key: String,
     mesh_index: usize,
@@ -203,11 +210,11 @@ impl WgpuRenderer {
         })
     }
 
-    fn render_rgb(
+    pub fn render_rgba(
         &mut self,
         world: &WorldState,
         request: &RenderRequest,
-    ) -> Result<FrameBuffer, RenderError> {
+    ) -> Result<WgpuRgbaFrame, RenderError> {
         let resolution = request.resolution;
         let (camera_node, camera) = select_camera(world, request)?;
         let camera_transform = world_transform(world, camera_node)?;
@@ -372,11 +379,24 @@ impl WgpuRenderer {
         self.queue.submit(std::iter::once(encoder.finish()));
         self.device.poll(wgpu::Maintain::Wait);
 
-        Ok(FrameBuffer {
-            kind: FrameKind::Rgb,
+        Ok(WgpuRgbaFrame {
             width: resolution[0],
             height: resolution[1],
-            bytes: encode_png_rgba(resolution, &rgba)?,
+            bytes: rgba,
+        })
+    }
+
+    fn render_rgb(
+        &mut self,
+        world: &WorldState,
+        request: &RenderRequest,
+    ) -> Result<FrameBuffer, RenderError> {
+        let rgba = self.render_rgba(world, request)?;
+        Ok(FrameBuffer {
+            kind: FrameKind::Rgb,
+            width: rgba.width,
+            height: rgba.height,
+            bytes: encode_png_rgba([rgba.width, rgba.height], &rgba.bytes)?,
         })
     }
 
