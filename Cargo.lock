@@ -2105,6 +2105,7 @@ dependencies = [
  "pge-core",
  "pge-physics",
  "pge-renderer",
+ "pge-video",
  "rand",
  "serde",
  "serde_json",
@@ -2143,6 +2144,10 @@ dependencies = [
  "pge-core",
  "serde",
 ]
+
+[[package]]
+name = "pge-video"
+version = "0.1.0"
 
 [[package]]
 name = "pge_editor"

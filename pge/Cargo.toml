@@ -9,6 +9,7 @@ edition = "2021"
 pge-core = { path = "../pge-core" }
 pge-physics = { path = "../pge-physics" }
 pge-renderer = { path = "../pge-renderer" }
+pge-video = { path = "../pge-video" }
 pge-app = { path = "../pge-app" }
 log = "0.4"
 winit = { version = "0.30", optional = true }
