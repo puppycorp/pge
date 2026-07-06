@@ -78,7 +78,7 @@ struct RenderObject {
 struct DrawItem {
     mesh_key: String,
     mesh_index: usize,
-    object_bind_group: wgpu::BindGroup,
+    dynamic_offset: u32,
 }
 
 pub struct WgpuRenderer {
@@ -126,7 +126,7 @@ impl WgpuRenderer {
                     visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
+                        has_dynamic_offset: true,
                         min_binding_size: None,
                     },
                     count: None,
@@ -270,38 +270,49 @@ impl WgpuRenderer {
         for (object, mesh_key) in render_objects.iter().zip(mesh_keys.iter()) {
             self.ensure_gpu_meshes(world, object.mesh_id, mesh_key)?;
         }
+        let object_uniform_stride = 256_usize;
+        let mut object_uniform_bytes = Vec::new();
         let mut draw_items = Vec::new();
         for (object, mesh_key) in render_objects.iter().zip(mesh_keys.iter()) {
             if let Some(meshes) = self.gpu_cache.get(mesh_key) {
                 for (mesh_index, mesh) in meshes.iter().enumerate() {
+                    let dynamic_offset = object_uniform_bytes.len() as u32;
+                    object_uniform_bytes
+                        .resize(object_uniform_bytes.len() + object_uniform_stride, 0);
                     let uniform = ObjectUniform {
                         model: object.transform.to_cols_array_2d(),
                         color: multiply_color(object.color, mesh.color),
                     };
-                    let buffer =
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("pge object uniform"),
-                                contents: bytemuck::bytes_of(&uniform),
-                                usage: wgpu::BufferUsages::UNIFORM,
-                            });
-                    let object_bind_group =
-                        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("pge object bind group"),
-                            layout: &self.object_bind_group_layout,
-                            entries: &[wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: buffer.as_entire_binding(),
-                            }],
-                        });
+                    let uniform_bytes = bytemuck::bytes_of(&uniform);
+                    object_uniform_bytes
+                        [dynamic_offset as usize..dynamic_offset as usize + uniform_bytes.len()]
+                        .copy_from_slice(uniform_bytes);
                     draw_items.push(DrawItem {
                         mesh_key: mesh_key.clone(),
                         mesh_index,
-                        object_bind_group,
+                        dynamic_offset,
                     });
                 }
             }
         }
+        if object_uniform_bytes.is_empty() {
+            object_uniform_bytes.resize(object_uniform_stride, 0);
+        }
+        let object_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("pge object uniform buffer"),
+                contents: &object_uniform_bytes,
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let object_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("pge object bind group"),
+            layout: &self.object_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: object_buffer.as_entire_binding(),
+            }],
+        });
 
         let mut encoder = self
             .device
@@ -340,7 +351,7 @@ impl WgpuRenderer {
             for item in &draw_items {
                 if let Some(meshes) = self.gpu_cache.get(&item.mesh_key) {
                     if let Some(mesh) = meshes.get(item.mesh_index) {
-                        pass.set_bind_group(1, &item.object_bind_group, &[]);
+                        pass.set_bind_group(1, &object_bind_group, &[item.dynamic_offset]);
                         pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                         pass.set_index_buffer(
                             mesh.index_buffer.slice(..),
