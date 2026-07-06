@@ -9,6 +9,7 @@ edition = "2021"
 pge-core = { path = "../pge-core" }
 pge-physics = { path = "../pge-physics" }
 pge-renderer = { path = "../pge-renderer" }
+pge-wgpu-renderer = { path = "../pge-wgpu-renderer", optional = true }
 pge-video = { path = "../pge-video" }
 pge-app = { path = "../pge-app" }
 log = "0.4"
@@ -34,6 +35,7 @@ rand = "0.8"
 
 [features]
 wgpu_winit = ["wgpu", "winit"]
+wgpu_renderer = ["pge-wgpu-renderer"]
 
 
 [[bench]]

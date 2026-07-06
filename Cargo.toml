@@ -3,6 +3,7 @@ members = [
     "pge-core",
     "pge-physics",
     "pge-renderer",
+    "pge-wgpu-renderer",
     "pge-video",
     "pge-app",
     "pge",

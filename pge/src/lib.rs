@@ -32,11 +32,15 @@ pub use pge_core as world;
 pub use pge_physics as shared_physics;
 pub use pge_renderer as render;
 pub use pge_video as video;
+#[cfg(feature = "wgpu_renderer")]
+pub use pge_wgpu_renderer as wgpu_renderer;
 pub use pge_app::{AppState, EngineState, InputState};
 pub use pge_core::{EntityId, EntityMetadata, WorldState};
 pub use pge_physics::{PhysicsStep, PhysicsSystem as SharedPhysicsSystem};
 pub use pge_renderer::{FrameBuffer, FrameKind, RenderMetadata, RenderOutput, RenderRequest, RenderView, Renderer};
 pub use pge_video::{Mp4EncodeRequest, PngSequence, VideoError, encode_png_sequence_to_mp4};
+#[cfg(feature = "wgpu_renderer")]
+pub use pge_wgpu_renderer::WgpuRenderer;
 pub use types::*;
 pub use shapes::*;
 pub use gui::*;
