@@ -89,14 +89,29 @@ struct DrawItem {
     dynamic_offset: u32,
 }
 
+struct RenderTarget {
+    color_texture: wgpu::Texture,
+    color_view: wgpu::TextureView,
+    _depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
+    readback_buffer: wgpu::Buffer,
+    unpadded_bytes_per_row: u32,
+    padded_bytes_per_row: u32,
+}
+
 pub struct WgpuRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
-    camera_bind_group_layout: wgpu::BindGroupLayout,
     object_bind_group_layout: wgpu::BindGroupLayout,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    object_buffer: wgpu::Buffer,
+    object_buffer_capacity: usize,
+    object_bind_group: wgpu::BindGroup,
     mesh_cache: HashMap<String, Vec<MeshData>>,
     gpu_cache: HashMap<String, Vec<GpuMesh>>,
+    render_targets: HashMap<[u32; 2], RenderTarget>,
 }
 
 impl WgpuRenderer {
@@ -198,15 +213,53 @@ impl WgpuRenderer {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
+        let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pge camera uniform"),
+            size: std::mem::size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("pge camera bind group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+        let object_buffer_capacity = 256_usize;
+        let object_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pge object uniform buffer"),
+            size: object_buffer_capacity as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let object_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("pge object bind group"),
+            layout: &object_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &object_buffer,
+                    offset: 0,
+                    size: NonZeroU64::new(std::mem::size_of::<ObjectUniform>() as u64),
+                }),
+            }],
+        });
 
         Ok(Self {
             device,
             queue,
             pipeline,
-            camera_bind_group_layout,
             object_bind_group_layout,
+            camera_buffer,
+            camera_bind_group,
+            object_buffer,
+            object_buffer_capacity,
+            object_bind_group,
             mesh_cache: HashMap::new(),
             gpu_cache: HashMap::new(),
+            render_targets: HashMap::new(),
         })
     }
 
@@ -223,52 +276,8 @@ impl WgpuRenderer {
             view_proj: view_proj.to_cols_array_2d(),
             light_dir: [0.35, 0.45, -0.82, 0.0],
         };
-        let camera_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("pge camera uniform"),
-                contents: bytemuck::bytes_of(&camera_uniform),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-        let camera_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("pge camera bind group"),
-            layout: &self.camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-        });
-
-        let color_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("pge render color texture"),
-            size: wgpu::Extent3d {
-                width: resolution[0],
-                height: resolution[1],
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("pge render depth texture"),
-            size: wgpu::Extent3d {
-                width: resolution[0],
-                height: resolution[1],
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth24Plus,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.queue
+            .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
 
         let render_objects = collect_render_objects(world)?;
         let mesh_keys: Vec<String> = render_objects
@@ -306,25 +315,14 @@ impl WgpuRenderer {
         if object_uniform_bytes.is_empty() {
             object_uniform_bytes.resize(object_uniform_stride, 0);
         }
-        let object_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("pge object uniform buffer"),
-                contents: &object_uniform_bytes,
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-        let object_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("pge object bind group"),
-            layout: &self.object_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &object_buffer,
-                    offset: 0,
-                    size: NonZeroU64::new(std::mem::size_of::<ObjectUniform>() as u64),
-                }),
-            }],
-        });
+        self.ensure_object_buffer(object_uniform_bytes.len());
+        self.queue
+            .write_buffer(&self.object_buffer, 0, &object_uniform_bytes);
+        self.ensure_render_target(resolution);
+        let target = self
+            .render_targets
+            .get(&resolution)
+            .expect("render target exists");
 
         let mut encoder = self
             .device
@@ -335,7 +333,7 @@ impl WgpuRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("pge render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &color_view,
+                    view: &target.color_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -348,7 +346,7 @@ impl WgpuRenderer {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth_view,
+                    view: &target.depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -359,11 +357,11 @@ impl WgpuRenderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &camera_bind_group, &[]);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
             for item in &draw_items {
                 if let Some(meshes) = self.gpu_cache.get(&item.mesh_key) {
                     if let Some(mesh) = meshes.get(item.mesh_index) {
-                        pass.set_bind_group(1, &object_bind_group, &[item.dynamic_offset]);
+                        pass.set_bind_group(1, &self.object_bind_group, &[item.dynamic_offset]);
                         pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                         pass.set_index_buffer(
                             mesh.index_buffer.slice(..),
@@ -375,9 +373,10 @@ impl WgpuRenderer {
             }
         }
 
-        let rgba = self.read_texture_rgba(&mut encoder, &color_texture, resolution)?;
+        self.copy_target_to_readback(&mut encoder, target, resolution);
         self.queue.submit(std::iter::once(encoder.finish()));
         self.device.poll(wgpu::Maintain::Wait);
+        let rgba = self.map_target_rgba(target, resolution)?;
 
         Ok(WgpuRgbaFrame {
             width: resolution[0],
@@ -400,35 +399,24 @@ impl WgpuRenderer {
         })
     }
 
-    fn read_texture_rgba(
+    fn copy_target_to_readback(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        texture: &wgpu::Texture,
+        target: &RenderTarget,
         resolution: [u32; 2],
-    ) -> Result<Vec<u8>, RenderError> {
-        let bytes_per_pixel = 4;
-        let unpadded_bytes_per_row = resolution[0] * bytes_per_pixel;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
-        let output_buffer_size = padded_bytes_per_row as u64 * resolution[1] as u64;
-        let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("pge render readback buffer"),
-            size: output_buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+    ) {
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
-                texture,
+                texture: &target.color_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::ImageCopyBuffer {
-                buffer: &output_buffer,
+                buffer: &target.readback_buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(padded_bytes_per_row),
+                    bytes_per_row: Some(target.padded_bytes_per_row),
                     rows_per_image: Some(resolution[1]),
                 },
             },
@@ -438,7 +426,15 @@ impl WgpuRenderer {
                 depth_or_array_layers: 1,
             },
         );
-        let buffer_slice = output_buffer.slice(..);
+    }
+
+    fn map_target_rgba(
+        &self,
+        target: &RenderTarget,
+        resolution: [u32; 2],
+    ) -> Result<Vec<u8>, RenderError> {
+        let bytes_per_pixel = 4;
+        let buffer_slice = target.readback_buffer.slice(..);
         let (sender, receiver) = std::sync::mpsc::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = sender.send(result);
@@ -452,14 +448,104 @@ impl WgpuRenderer {
         let mapped = buffer_slice.get_mapped_range();
         let mut rgba = vec![0_u8; (resolution[0] * resolution[1] * bytes_per_pixel) as usize];
         for y in 0..resolution[1] as usize {
-            let src = y * padded_bytes_per_row as usize;
-            let dst = y * unpadded_bytes_per_row as usize;
-            rgba[dst..dst + unpadded_bytes_per_row as usize]
-                .copy_from_slice(&mapped[src..src + unpadded_bytes_per_row as usize]);
+            let src = y * target.padded_bytes_per_row as usize;
+            let dst = y * target.unpadded_bytes_per_row as usize;
+            rgba[dst..dst + target.unpadded_bytes_per_row as usize]
+                .copy_from_slice(&mapped[src..src + target.unpadded_bytes_per_row as usize]);
         }
         drop(mapped);
-        output_buffer.unmap();
+        target.readback_buffer.unmap();
         Ok(rgba)
+    }
+
+    fn ensure_object_buffer(&mut self, required_capacity: usize) {
+        if required_capacity <= self.object_buffer_capacity {
+            return;
+        }
+        let mut capacity = self.object_buffer_capacity.max(256);
+        while capacity < required_capacity {
+            capacity *= 2;
+        }
+        let object_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pge object uniform buffer"),
+            size: capacity as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let object_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("pge object bind group"),
+            layout: &self.object_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &object_buffer,
+                    offset: 0,
+                    size: NonZeroU64::new(std::mem::size_of::<ObjectUniform>() as u64),
+                }),
+            }],
+        });
+        self.object_buffer = object_buffer;
+        self.object_bind_group = object_bind_group;
+        self.object_buffer_capacity = capacity;
+    }
+
+    fn ensure_render_target(&mut self, resolution: [u32; 2]) {
+        if self.render_targets.contains_key(&resolution) {
+            return;
+        }
+        let bytes_per_pixel = 4;
+        let unpadded_bytes_per_row = resolution[0] * bytes_per_pixel;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
+        let output_buffer_size = padded_bytes_per_row as u64 * resolution[1] as u64;
+        let color_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("pge render color texture"),
+            size: wgpu::Extent3d {
+                width: resolution[0],
+                height: resolution[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("pge render depth texture"),
+            size: wgpu::Extent3d {
+                width: resolution[0],
+                height: resolution[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth24Plus,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let readback_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pge render readback buffer"),
+            size: output_buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        self.render_targets.insert(
+            resolution,
+            RenderTarget {
+                color_texture,
+                color_view,
+                _depth_texture: depth_texture,
+                depth_view,
+                readback_buffer,
+                unpadded_bytes_per_row,
+                padded_bytes_per_row,
+            },
+        );
     }
 
     fn ensure_gpu_meshes(
