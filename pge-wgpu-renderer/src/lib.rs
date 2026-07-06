@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 
 use bytemuck::{Pod, Zeroable};
@@ -19,6 +18,7 @@ use wgpu::util::DeviceExt;
 struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
+    color: [f32; 4],
 }
 
 impl Vertex {
@@ -37,6 +37,11 @@ impl Vertex {
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x3,
                 },
+                wgpu::VertexAttribute {
+                    offset: (std::mem::size_of::<[f32; 3]>() * 2) as wgpu::BufferAddress,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
             ],
         }
     }
@@ -49,24 +54,10 @@ struct CameraUniform {
     light_dir: [f32; 4],
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
-struct ObjectUniform {
-    model: [[f32; 4]; 4],
-    color: [f32; 4],
-}
-
 #[derive(Clone, Debug)]
 struct MeshData {
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
-    color: [f32; 4],
-}
-
-struct GpuMesh {
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    index_count: u32,
     color: [f32; 4],
 }
 
@@ -76,20 +67,12 @@ struct RenderObject {
     color: [f32; 4],
 }
 
-struct DrawItem {
-    mesh_key: String,
-    mesh_index: usize,
-    dynamic_offset: u32,
-}
-
 pub struct WgpuRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
     camera_bind_group_layout: wgpu::BindGroupLayout,
-    object_bind_group_layout: wgpu::BindGroupLayout,
     mesh_cache: HashMap<String, Vec<MeshData>>,
-    gpu_cache: HashMap<String, Vec<GpuMesh>>,
 }
 
 impl WgpuRenderer {
@@ -133,23 +116,9 @@ impl WgpuRenderer {
                     count: None,
                 }],
             });
-        let object_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("pge object bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pge wgpu pipeline layout"),
-            bind_group_layouts: &[&camera_bind_group_layout, &object_bind_group_layout],
+            bind_group_layouts: &[&camera_bind_group_layout],
             push_constant_ranges: &[],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -197,9 +166,7 @@ impl WgpuRenderer {
             queue,
             pipeline,
             camera_bind_group_layout,
-            object_bind_group_layout,
             mesh_cache: HashMap::new(),
-            gpu_cache: HashMap::new(),
         })
     }
 
@@ -264,60 +231,21 @@ impl WgpuRenderer {
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let render_objects = collect_render_objects(world)?;
-        let mesh_keys: Vec<String> = render_objects
-            .iter()
-            .map(|object| mesh_key(world, object.mesh_id))
-            .collect::<Result<_, _>>()?;
-        for (object, mesh_key) in render_objects.iter().zip(mesh_keys.iter()) {
-            self.ensure_gpu_meshes(world, object.mesh_id, mesh_key)?;
-        }
-        let object_uniform_stride = 256_usize;
-        let mut object_uniform_bytes = Vec::new();
-        let mut draw_items = Vec::new();
-        for (object, mesh_key) in render_objects.iter().zip(mesh_keys.iter()) {
-            if let Some(meshes) = self.gpu_cache.get(mesh_key) {
-                for (mesh_index, mesh) in meshes.iter().enumerate() {
-                    let dynamic_offset = object_uniform_bytes.len() as u32;
-                    object_uniform_bytes
-                        .resize(object_uniform_bytes.len() + object_uniform_stride, 0);
-                    let uniform = ObjectUniform {
-                        model: object.transform.to_cols_array_2d(),
-                        color: multiply_color(object.color, mesh.color),
-                    };
-                    let uniform_bytes = bytemuck::bytes_of(&uniform);
-                    object_uniform_bytes
-                        [dynamic_offset as usize..dynamic_offset as usize + uniform_bytes.len()]
-                        .copy_from_slice(uniform_bytes);
-                    draw_items.push(DrawItem {
-                        mesh_key: mesh_key.clone(),
-                        mesh_index,
-                        dynamic_offset,
-                    });
-                }
-            }
-        }
-        if object_uniform_bytes.is_empty() {
-            object_uniform_bytes.resize(object_uniform_stride, 0);
-        }
-        let object_buffer = self
+        let (vertices, indices) = self.build_frame_mesh(world, &render_objects)?;
+        let vertex_buffer = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("pge object uniform buffer"),
-                contents: &object_uniform_bytes,
-                usage: wgpu::BufferUsages::UNIFORM,
+                label: Some("pge frame vertices"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
             });
-        let object_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("pge object bind group"),
-            layout: &self.object_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &object_buffer,
-                    offset: 0,
-                    size: NonZeroU64::new(std::mem::size_of::<ObjectUniform>() as u64),
-                }),
-            }],
-        });
+        let index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("pge frame indices"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
 
         let mut encoder = self
             .device
@@ -353,18 +281,10 @@ impl WgpuRenderer {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &camera_bind_group, &[]);
-            for item in &draw_items {
-                if let Some(meshes) = self.gpu_cache.get(&item.mesh_key) {
-                    if let Some(mesh) = meshes.get(item.mesh_index) {
-                        pass.set_bind_group(1, &object_bind_group, &[item.dynamic_offset]);
-                        pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                        pass.set_index_buffer(
-                            mesh.index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint32,
-                        );
-                        pass.draw_indexed(0..mesh.index_count, 0, 0..1);
-                    }
-                }
+            if !indices.is_empty() {
+                pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
             }
         }
 
@@ -442,40 +362,37 @@ impl WgpuRenderer {
         Ok(rgba)
     }
 
-    fn ensure_gpu_meshes(
+    fn build_frame_mesh(
         &mut self,
         world: &WorldState,
-        mesh_id: ArenaId<Mesh>,
-        key: &str,
-    ) -> Result<(), RenderError> {
-        if self.gpu_cache.contains_key(key) {
-            return Ok(());
+        objects: &[RenderObject],
+    ) -> Result<(Vec<Vertex>, Vec<u32>), RenderError> {
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        for object in objects {
+            let key = mesh_key(world, object.mesh_id)?;
+            let meshes = self.mesh_data(world, object.mesh_id, &key)?.to_vec();
+            for mesh in meshes {
+                let base_index = vertices.len() as u32;
+                let color = multiply_color(object.color, mesh.color);
+                vertices.extend(mesh.vertices.iter().map(|vertex| {
+                    let position = object
+                        .transform
+                        .transform_point3(Vec3::from_array(vertex.position));
+                    let normal = object
+                        .transform
+                        .transform_vector3(Vec3::from_array(vertex.normal))
+                        .normalize_or_zero();
+                    Vertex {
+                        position: position.to_array(),
+                        normal: normal.to_array(),
+                        color,
+                    }
+                }));
+                indices.extend(mesh.indices.iter().map(|index| base_index + *index));
+            }
         }
-        let mesh_data = self.mesh_data(world, mesh_id, key)?.to_vec();
-        let gpu_meshes = mesh_data
-            .iter()
-            .filter(|mesh| !mesh.vertices.is_empty() && !mesh.indices.is_empty())
-            .map(|mesh| GpuMesh {
-                vertex_buffer: self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("pge mesh vertices"),
-                        contents: bytemuck::cast_slice(&mesh.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-                index_buffer: self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("pge mesh indices"),
-                        contents: bytemuck::cast_slice(&mesh.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    }),
-                index_count: mesh.indices.len() as u32,
-                color: mesh.color,
-            })
-            .collect();
-        self.gpu_cache.insert(key.to_string(), gpu_meshes);
-        Ok(())
+        Ok((vertices, indices))
     }
 
     fn mesh_data(
@@ -699,6 +616,7 @@ fn box_mesh(size: [f32; 3], color: [f32; 4]) -> MeshData {
         .map(|position| Vertex {
             position: *position,
             normal: Vec3::from_array(*position).normalize_or_zero().to_array(),
+            color,
         })
         .collect();
     MeshData {
@@ -727,6 +645,7 @@ fn sphere_mesh(radius: f32, color: [f32; 4]) -> MeshData {
             vertices.push(Vertex {
                 position: (normal * radius).to_array(),
                 normal: normal.to_array(),
+                color,
             });
         }
     }
@@ -756,10 +675,12 @@ fn cylinder_mesh(radius: f32, height: f32, color: [f32; 4]) -> MeshData {
         vertices.push(Vertex {
             position: [normal.x * radius, normal.y * radius, -half_h],
             normal: normal.to_array(),
+            color,
         });
         vertices.push(Vertex {
             position: [normal.x * radius, normal.y * radius, half_h],
             normal: normal.to_array(),
+            color,
         });
     }
     for segment in 0..segments {
@@ -818,7 +739,11 @@ fn load_gltf_meshes(
             let vertices = positions
                 .into_iter()
                 .zip(normals.into_iter())
-                .map(|(position, normal)| Vertex { position, normal })
+                .map(|(position, normal)| Vertex {
+                    position,
+                    normal,
+                    color,
+                })
                 .collect();
             meshes.push(MeshData {
                 vertices,
