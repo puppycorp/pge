@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 
 use bytemuck::{Pod, Zeroable};
@@ -310,7 +311,11 @@ impl WgpuRenderer {
             layout: &self.object_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: object_buffer.as_entire_binding(),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &object_buffer,
+                    offset: 0,
+                    size: NonZeroU64::new(std::mem::size_of::<ObjectUniform>() as u64),
+                }),
             }],
         });
 
