@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
@@ -9,8 +10,8 @@ use pge_core::{
     WorldState,
 };
 use pge_renderer::{
-    FrameBuffer, FrameKind, RenderError, RenderMetadata, RenderOutput, RenderRequest, RenderView,
-    Renderer,
+    FrameBuffer, FrameKind, OffscreenRenderer, ProfiledRenderer, RenderError, RenderMetadata,
+    RenderOutput, RenderPerformanceProfile, RenderRequest, RenderView, Renderer, RgbaFrame,
 };
 use wgpu::util::DeviceExt;
 
@@ -76,12 +77,7 @@ struct RenderObject {
     color: [f32; 4],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WgpuRgbaFrame {
-    pub width: u32,
-    pub height: u32,
-    pub bytes: Vec<u8>,
-}
+pub type WgpuRgbaFrame = RgbaFrame;
 
 struct DrawItem {
     mesh_key: String,
@@ -99,8 +95,37 @@ struct RenderTarget {
     padded_bytes_per_row: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WgpuRenderTimings {
+    pub total: Duration,
+    pub camera: Duration,
+    pub collect_objects: Duration,
+    pub mesh_keys: Duration,
+    pub ensure_gpu_meshes: Duration,
+    pub object_uniforms: Duration,
+    pub render_submit: Duration,
+    pub object_count: usize,
+    pub draw_item_count: usize,
+}
+
+impl From<WgpuRenderTimings> for RenderPerformanceProfile {
+    fn from(timings: WgpuRenderTimings) -> Self {
+        let mut profile = RenderPerformanceProfile::single_frame("wgpu-renderer");
+        profile.add_timing("total", timings.total);
+        profile.add_timing("camera", timings.camera);
+        profile.add_timing("collectObjects", timings.collect_objects);
+        profile.add_timing("meshKeys", timings.mesh_keys);
+        profile.add_timing("ensureGpuMeshes", timings.ensure_gpu_meshes);
+        profile.add_timing("objectUniforms", timings.object_uniforms);
+        profile.add_timing("renderSubmit", timings.render_submit);
+        profile.set_counter("objectCount", timings.object_count as u64);
+        profile.set_counter("drawItemCount", timings.draw_item_count as u64);
+        profile
+    }
+}
+
 pub struct WgpuRenderer {
-    device: wgpu::Device,
+    pub(crate) device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
     object_bind_group_layout: wgpu::BindGroupLayout,
@@ -130,17 +155,21 @@ impl WgpuRenderer {
             .await
             .ok_or_else(|| RenderError::new("no WGPU adapter available"))?;
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("pge-wgpu-renderer-device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                },
-                None,
-            )
+            .request_device(&default_device_descriptor(), None)
             .await
             .map_err(|err| RenderError::new(format!("create WGPU device: {err}")))?;
+        Ok(Self::from_device(
+            device,
+            queue,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        ))
+    }
 
+    pub fn from_device(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        target_format: wgpu::TextureFormat,
+    ) -> Self {
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("pge camera bind group layout"),
@@ -191,7 +220,7 @@ impl WgpuRenderer {
                 module: &shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    format: target_format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -247,7 +276,7 @@ impl WgpuRenderer {
             }],
         });
 
-        Ok(Self {
+        Self {
             device,
             queue,
             pipeline,
@@ -260,7 +289,125 @@ impl WgpuRenderer {
             mesh_cache: HashMap::new(),
             gpu_cache: HashMap::new(),
             render_targets: HashMap::new(),
-        })
+        }
+    }
+
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    pub fn render_to_view(
+        &mut self,
+        world: &WorldState,
+        request: &RenderRequest,
+        color_view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
+    ) -> Result<(), RenderError> {
+        let resolution = request.resolution;
+        let (camera_node, camera) = select_camera(world, request)?;
+        let camera_transform = world_transform(world, camera_node)?;
+        let view_proj = camera_view_projection(camera, camera_transform, resolution)?;
+        let camera_uniform = CameraUniform {
+            view_proj: view_proj.to_cols_array_2d(),
+            light_dir: [0.35, 0.45, -0.82, 0.0],
+        };
+        self.queue
+            .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
+
+        let render_objects = collect_render_objects(world)?;
+        let mesh_keys: Vec<String> = render_objects
+            .iter()
+            .map(|object| mesh_key(world, object.mesh_id))
+            .collect::<Result<_, _>>()?;
+        for (object, mesh_key) in render_objects.iter().zip(mesh_keys.iter()) {
+            self.ensure_gpu_meshes(world, object.mesh_id, mesh_key)?;
+        }
+        let object_uniform_stride = 256_usize;
+        let mut object_uniform_bytes = Vec::new();
+        let mut draw_items = Vec::new();
+        for (object, mesh_key) in render_objects.iter().zip(mesh_keys.iter()) {
+            if let Some(meshes) = self.gpu_cache.get(mesh_key) {
+                for (mesh_index, mesh) in meshes.iter().enumerate() {
+                    let dynamic_offset = object_uniform_bytes.len() as u32;
+                    object_uniform_bytes
+                        .resize(object_uniform_bytes.len() + object_uniform_stride, 0);
+                    let uniform = ObjectUniform {
+                        model: object.transform.to_cols_array_2d(),
+                        color: multiply_color(object.color, mesh.color),
+                    };
+                    let uniform_bytes = bytemuck::bytes_of(&uniform);
+                    object_uniform_bytes
+                        [dynamic_offset as usize..dynamic_offset as usize + uniform_bytes.len()]
+                        .copy_from_slice(uniform_bytes);
+                    draw_items.push(DrawItem {
+                        mesh_key: mesh_key.clone(),
+                        mesh_index,
+                        dynamic_offset,
+                    });
+                }
+            }
+        }
+        if object_uniform_bytes.is_empty() {
+            object_uniform_bytes.resize(object_uniform_stride, 0);
+        }
+        self.ensure_object_buffer(object_uniform_bytes.len());
+        self.queue
+            .write_buffer(&self.object_buffer, 0, &object_uniform_bytes);
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("pge surface render encoder"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("pge surface render pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.05,
+                            g: 0.09,
+                            b: 0.13,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            for item in &draw_items {
+                if let Some(meshes) = self.gpu_cache.get(&item.mesh_key) {
+                    if let Some(mesh) = meshes.get(item.mesh_index) {
+                        pass.set_bind_group(1, &self.object_bind_group, &[item.dynamic_offset]);
+                        pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                        pass.set_index_buffer(
+                            mesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                    }
+                }
+            }
+        }
+        self.queue.submit(std::iter::once(encoder.finish()));
+        Ok(())
     }
 
     pub fn render_rgba(
@@ -378,10 +525,151 @@ impl WgpuRenderer {
         self.device.poll(wgpu::Maintain::Wait);
         let rgba = self.map_target_rgba(target, resolution)?;
 
-        Ok(WgpuRgbaFrame {
+        Ok(RgbaFrame {
             width: resolution[0],
             height: resolution[1],
             bytes: rgba,
+        })
+    }
+
+    pub fn render_profile(
+        &mut self,
+        world: &WorldState,
+        request: &RenderRequest,
+    ) -> Result<WgpuRenderTimings, RenderError> {
+        let total_start = std::time::Instant::now();
+        let resolution = request.resolution;
+
+        let camera_start = std::time::Instant::now();
+        let (camera_node, camera) = select_camera(world, request)?;
+        let camera_transform = world_transform(world, camera_node)?;
+        let view_proj = camera_view_projection(camera, camera_transform, resolution)?;
+        let camera_uniform = CameraUniform {
+            view_proj: view_proj.to_cols_array_2d(),
+            light_dir: [0.35, 0.45, -0.82, 0.0],
+        };
+        self.queue
+            .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
+        let camera_elapsed = camera_start.elapsed();
+
+        let collect_start = std::time::Instant::now();
+        let render_objects = collect_render_objects(world)?;
+        let collect_elapsed = collect_start.elapsed();
+
+        let mesh_keys_start = std::time::Instant::now();
+        let mesh_keys: Vec<String> = render_objects
+            .iter()
+            .map(|object| mesh_key(world, object.mesh_id))
+            .collect::<Result<_, _>>()?;
+        let mesh_keys_elapsed = mesh_keys_start.elapsed();
+
+        let ensure_start = std::time::Instant::now();
+        for (object, mesh_key) in render_objects.iter().zip(mesh_keys.iter()) {
+            self.ensure_gpu_meshes(world, object.mesh_id, mesh_key)?;
+        }
+        let ensure_elapsed = ensure_start.elapsed();
+
+        let uniforms_start = std::time::Instant::now();
+        let object_uniform_stride = 256_usize;
+        let mut object_uniform_bytes = Vec::new();
+        let mut draw_items = Vec::new();
+        for (object, mesh_key) in render_objects.iter().zip(mesh_keys.iter()) {
+            if let Some(meshes) = self.gpu_cache.get(mesh_key) {
+                for (mesh_index, mesh) in meshes.iter().enumerate() {
+                    let dynamic_offset = object_uniform_bytes.len() as u32;
+                    object_uniform_bytes
+                        .resize(object_uniform_bytes.len() + object_uniform_stride, 0);
+                    let uniform = ObjectUniform {
+                        model: object.transform.to_cols_array_2d(),
+                        color: multiply_color(object.color, mesh.color),
+                    };
+                    let uniform_bytes = bytemuck::bytes_of(&uniform);
+                    object_uniform_bytes
+                        [dynamic_offset as usize..dynamic_offset as usize + uniform_bytes.len()]
+                        .copy_from_slice(uniform_bytes);
+                    draw_items.push(DrawItem {
+                        mesh_key: mesh_key.clone(),
+                        mesh_index,
+                        dynamic_offset,
+                    });
+                }
+            }
+        }
+        if object_uniform_bytes.is_empty() {
+            object_uniform_bytes.resize(object_uniform_stride, 0);
+        }
+        self.ensure_object_buffer(object_uniform_bytes.len());
+        self.queue
+            .write_buffer(&self.object_buffer, 0, &object_uniform_bytes);
+        let uniforms_elapsed = uniforms_start.elapsed();
+
+        let render_submit_start = std::time::Instant::now();
+        self.ensure_render_target(resolution);
+        let target = self
+            .render_targets
+            .get(&resolution)
+            .expect("render target exists");
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("pge profile render encoder"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("pge profile render pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.05,
+                            g: 0.09,
+                            b: 0.13,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &target.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            for item in &draw_items {
+                if let Some(meshes) = self.gpu_cache.get(&item.mesh_key) {
+                    if let Some(mesh) = meshes.get(item.mesh_index) {
+                        pass.set_bind_group(1, &self.object_bind_group, &[item.dynamic_offset]);
+                        pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                        pass.set_index_buffer(
+                            mesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                    }
+                }
+            }
+        }
+        self.queue.submit(std::iter::once(encoder.finish()));
+        let render_submit_elapsed = render_submit_start.elapsed();
+
+        Ok(WgpuRenderTimings {
+            total: total_start.elapsed(),
+            camera: camera_elapsed,
+            collect_objects: collect_elapsed,
+            mesh_keys: mesh_keys_elapsed,
+            ensure_gpu_meshes: ensure_elapsed,
+            object_uniforms: uniforms_elapsed,
+            render_submit: render_submit_elapsed,
+            object_count: render_objects.len(),
+            draw_item_count: draw_items.len(),
         })
     }
 
@@ -612,6 +900,26 @@ impl WgpuRenderer {
     }
 }
 
+impl OffscreenRenderer for WgpuRenderer {
+    fn render_rgba(
+        &mut self,
+        world: &WorldState,
+        request: &RenderRequest,
+    ) -> Result<RgbaFrame, RenderError> {
+        WgpuRenderer::render_rgba(self, world, request)
+    }
+}
+
+impl ProfiledRenderer for WgpuRenderer {
+    fn profile_render(
+        &mut self,
+        world: &WorldState,
+        request: &RenderRequest,
+    ) -> Result<RenderPerformanceProfile, RenderError> {
+        self.render_profile(world, request).map(Into::into)
+    }
+}
+
 impl Renderer for WgpuRenderer {
     fn render(
         &mut self,
@@ -619,7 +927,7 @@ impl Renderer for WgpuRenderer {
         request: &RenderRequest,
     ) -> Result<RenderOutput, RenderError> {
         let mut frames = Vec::new();
-        if request.views.iter().any(|view| *view == RenderView::Rgb) {
+        if request.views.contains(&RenderView::Rgb) {
             frames.push(self.render_rgb(world, request)?);
         }
         Ok(RenderOutput {
@@ -637,6 +945,14 @@ impl Renderer for WgpuRenderer {
             },
             frames,
         })
+    }
+}
+
+fn default_device_descriptor() -> wgpu::DeviceDescriptor<'static> {
+    wgpu::DeviceDescriptor {
+        label: Some("pge wgpu renderer device"),
+        required_features: wgpu::Features::empty(),
+        required_limits: wgpu::Limits::default(),
     }
 }
 
@@ -923,7 +1239,7 @@ fn load_gltf_meshes(
             };
             let vertices = positions
                 .into_iter()
-                .zip(normals.into_iter())
+                .zip(normals)
                 .map(|(position, normal)| Vertex { position, normal })
                 .collect();
             meshes.push(MeshData {

@@ -139,8 +139,9 @@ impl<T> Arena<T> {
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (ArenaId<T>, &mut T)> {
-        self.items.iter_mut().enumerate().filter_map(|(index, item)| {
-            item.as_mut().map(|item| (ArenaId::new(index), item))
-        })
+        self.items
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(index, item)| item.as_mut().map(|item| (ArenaId::new(index), item)))
     }
 }

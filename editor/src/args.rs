@@ -1,7 +1,6 @@
 use clap::Parser;
 use clap::Subcommand;
 
-
 #[derive(Debug, Parser)]
 #[clap(name = "w")]
 pub struct Args {
@@ -11,7 +10,5 @@ pub struct Args {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Inspect {
-        path: String,
-    }
+    Inspect { path: String },
 }

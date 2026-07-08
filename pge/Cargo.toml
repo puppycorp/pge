@@ -12,29 +12,13 @@ pge-renderer = { path = "../pge-renderer" }
 pge-wgpu-renderer = { path = "../pge-wgpu-renderer", optional = true }
 pge-video = { path = "../pge-video" }
 pge-app = { path = "../pge-app" }
-log = "0.4"
-winit = { version = "0.30", optional = true }
-wgpu = { version = "0.20", optional = true }
-anyhow = "1"
-bytemuck = { version = "1.15", features = ["derive"] }
-glam = "0.27.0"
-ttf-parser = "0.21.1"
-lyon = "1.0.1"
-image = "0.25"
-gltf = "1"
-colored = "2"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1" }
-futures = "0.3"
-urdf-rs = "0.8"
-stl_io = "0.7"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"]  }
 rand = "0.8"
 
 [features]
-wgpu_winit = ["wgpu", "winit"]
+wgpu_winit = []
 wgpu_renderer = ["pge-wgpu-renderer"]
 
 

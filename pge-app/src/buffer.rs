@@ -38,7 +38,7 @@ impl Buffer {
     }
 
     pub fn write(&mut self, data: &[u8]) {
-		self.data.extend_from_slice(data);
+        self.data.extend_from_slice(data);
     }
 
     pub fn len(&self) -> u64 {
@@ -50,21 +50,26 @@ impl Buffer {
     }
 
     pub fn flush(&mut self, hardware: &mut impl Hardware) {
-		let write_len = (self.data.len() + 3) & !3;
-		if write_len > self.handle.size as usize {
-			let new_size = (write_len as f32 * 1.5) as u64;
-			crate::log2!("resizing buffer {:?} from {} to {}", self.handle, self.handle.size, new_size);
-			hardware.destroy_buffer(self.handle);
-			self.handle = hardware.create_buffer("buffer", new_size);
-		}
-		if write_len == self.data.len() {
-			hardware.write_buffer(self.handle, &self.data);
-		} else {
-			let mut padded = Vec::with_capacity(write_len);
-			padded.extend_from_slice(&self.data);
-			padded.resize(write_len, 0);
-			hardware.write_buffer(self.handle, &padded);
-		}
+        let write_len = (self.data.len() + 3) & !3;
+        if write_len > self.handle.size as usize {
+            let new_size = (write_len as f32 * 1.5) as u64;
+            crate::log2!(
+                "resizing buffer {:?} from {} to {}",
+                self.handle,
+                self.handle.size,
+                new_size
+            );
+            hardware.destroy_buffer(self.handle);
+            self.handle = hardware.create_buffer("buffer", new_size);
+        }
+        if write_len == self.data.len() {
+            hardware.write_buffer(self.handle, &self.data);
+        } else {
+            let mut padded = Vec::with_capacity(write_len);
+            padded.extend_from_slice(&self.data);
+            padded.resize(write_len, 0);
+            hardware.write_buffer(self.handle, &padded);
+        }
         self.data.clear();
     }
 }
@@ -122,16 +127,16 @@ mod tests {
         buffer.flush(&mut hardware);
         assert!(buffer.data.is_empty());
 
-		{
-			let written = hardware.buffers_written.borrow();
-			assert_eq!(written.len(), 1);
-			assert_eq!(written[0].0, handle);
-			assert_eq!(written[0].1, vec![10, 20, 30, 0]);
-		}
+        {
+            let written = hardware.buffers_written.borrow();
+            assert_eq!(written.len(), 1);
+            assert_eq!(written[0].0, handle);
+            assert_eq!(written[0].1, vec![10, 20, 30, 0]);
+        }
 
         // Try writing again after flush
         buffer.write(&[40, 50, 60]);
-		assert_eq!(buffer.len(), 3);
+        assert_eq!(buffer.len(), 3);
         buffer.flush(&mut hardware);
         assert!(buffer.data.is_empty());
         let written = hardware.buffers_written.borrow();

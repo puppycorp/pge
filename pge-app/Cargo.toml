@@ -5,3 +5,25 @@ edition = "2021"
 
 [dependencies]
 pge-core = { path = "../pge-core" }
+pge-renderer = { path = "../pge-renderer" }
+pge-wgpu-renderer = { path = "../pge-wgpu-renderer" }
+anyhow = "1"
+bytemuck = { version = "1.15", features = ["derive"] }
+colored = "2"
+futures = "0.3"
+glam = "0.27.0"
+gltf = "1"
+image = "0.25"
+log = "0.4"
+lyon = "1.0.1"
+pollster = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1" }
+stl_io = "0.7"
+ttf-parser = "0.21.1"
+urdf-rs = "0.8"
+wgpu = "0.20"
+winit = "0.30"
+
+[dev-dependencies]
+rand = "0.8"

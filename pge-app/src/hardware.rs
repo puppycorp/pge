@@ -1,19 +1,43 @@
-use std::ops::Range;
 use crate::buffer::Buffer;
 use crate::buffer::BufferSlice;
 use crate::ArenaId;
 use crate::Window;
+use std::ops::Range;
 
 pub trait Hardware {
-    fn create_buffer(&mut self, name: &str, size: u64) -> BufferHandle { unimplemented!() }
-	fn destroy_buffer(&mut self, handle: BufferHandle) { unimplemented!() }
-    fn create_texture(&mut self, name: &str, data: &[u8], width: u32, height: u32) -> TextureHandle { unimplemented!() }
-    fn create_pipeline(&mut self, name: &str, window: WindowHandle) -> PipelineHandle { unimplemented!() }
-    fn render(&mut self, encoder: RenderEncoder, window: WindowHandle) { unimplemented!() }
-    fn create_window(&mut self, window: &Window) -> WindowHandle { unimplemented!() }
-    fn destroy_window(&mut self, handle: WindowHandle) { unimplemented!() }
-	fn write_buffer(&mut self, buffer: BufferHandle, data: &[u8]) { unimplemented!() }
-	fn save_screenshot(&mut self, window: WindowHandle, path: &str) { unimplemented!() }
+    fn create_buffer(&mut self, name: &str, size: u64) -> BufferHandle {
+        unimplemented!()
+    }
+    fn destroy_buffer(&mut self, handle: BufferHandle) {
+        unimplemented!()
+    }
+    fn create_texture(
+        &mut self,
+        name: &str,
+        data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> TextureHandle {
+        unimplemented!()
+    }
+    fn create_pipeline(&mut self, name: &str, window: WindowHandle) -> PipelineHandle {
+        unimplemented!()
+    }
+    fn render(&mut self, encoder: RenderEncoder, window: WindowHandle) {
+        unimplemented!()
+    }
+    fn create_window(&mut self, window: &Window) -> WindowHandle {
+        unimplemented!()
+    }
+    fn destroy_window(&mut self, handle: WindowHandle) {
+        unimplemented!()
+    }
+    fn write_buffer(&mut self, buffer: BufferHandle, data: &[u8]) {
+        unimplemented!()
+    }
+    fn save_screenshot(&mut self, window: WindowHandle, path: &str) {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,28 +50,24 @@ pub struct PipelineHandle {
     pub id: u32,
 }
 
-pub struct Surface {
-
-}
+pub struct Surface {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BufferHandle {
     pub id: u32,
-	pub size: u64,
+    pub size: u64,
 }
 
 #[derive(Debug)]
 pub struct Pipeline {}
 
 pub struct RenderEncoder {
-    pub passes: Vec<RenderPass>
+    pub passes: Vec<RenderPass>,
 }
 
 impl RenderEncoder {
     pub fn new() -> Self {
-        Self {
-            passes: Vec::new(),
-        }
+        Self { passes: Vec::new() }
     }
 
     pub fn begin_render_pass(&mut self) -> &mut RenderPass {
@@ -55,7 +75,7 @@ impl RenderEncoder {
         self.passes.push(render_pass);
         self.passes.last_mut().unwrap()
     }
-}   
+}
 
 #[derive(Default, Debug)]
 pub struct RenderPass {
@@ -96,7 +116,7 @@ impl RenderPass {
             buffers: self.buffers.clone(),
             indices: self.indices.clone(),
             instances: self.instances.clone(),
-			textures: self.textures.clone(),
+            textures: self.textures.clone(),
         };
         self.subpasses.push(subpass);
     }
@@ -114,7 +134,7 @@ pub struct Subpass {
     pub buffers: Vec<(u32, BufferHandle)>,
     pub indices: Option<Range<u32>>,
     pub instances: Option<Range<u32>>,
-	pub textures: Vec<(u32, TextureHandle)>,
+    pub textures: Vec<(u32, TextureHandle)>,
 }
 
 #[derive(Debug, Clone, Copy)]

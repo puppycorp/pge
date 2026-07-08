@@ -46,14 +46,14 @@ fn create_big_state() -> State {
 }
 
 fn bench_topo_sort_nodes(c: &mut Criterion) {
-	let state = create_big_state();
-	println!("state nodes count: {}", state.nodes.len());
-	let mut sorted_nodes = Vec::new();
-	c.bench_function("topo_sort_nodes", |b| {
-		b.iter(|| {
-			utility::topo_sort_nodes(&state.nodes, &mut sorted_nodes);
-		});
-	});
+    let state = create_big_state();
+    println!("state nodes count: {}", state.nodes.len());
+    let mut sorted_nodes = Vec::new();
+    c.bench_function("topo_sort_nodes", |b| {
+        b.iter(|| {
+            utility::topo_sort_nodes(&state.nodes, &mut sorted_nodes);
+        });
+    });
 }
 
 criterion_group!(process_nodes, bench_topo_sort_nodes);

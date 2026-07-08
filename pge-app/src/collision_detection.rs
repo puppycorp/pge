@@ -117,8 +117,8 @@ pub fn obb_collide(
             + half_size1[(i + 2) % 3] * r_abs.col((i + 1) % 3)[j];
         let rb = half_size2[(j + 1) % 3] * r_abs.col(i)[(j + 2) % 3]
             + half_size2[(j + 2) % 3] * r_abs.col(i)[(j + 1) % 3];
-        let t_component = t[(i + 2) % 3] * r.col((i + 1) % 3)[j]
-            - t[(i + 1) % 3] * r.col((i + 2) % 3)[j];
+        let t_component =
+            t[(i + 2) % 3] * r.col((i + 1) % 3)[j] - t[(i + 1) % 3] * r.col((i + 2) % 3)[j];
         let overlap = t_component.abs() - (ra + rb);
         if overlap > 0.0 {
             return None; // Separation axis found
@@ -155,11 +155,23 @@ pub fn obb_collide(
     let final_normal = if is_axis_aligned(&min_axis) {
         // If the collision is primarily vertical (Y-axis), prefer that
         if t.y.abs() > t.x.abs() && t.y.abs() > t.z.abs() {
-            if t.y > 0.0 { Vec3::Y } else { -Vec3::Y }
+            if t.y > 0.0 {
+                Vec3::Y
+            } else {
+                -Vec3::Y
+            }
         } else if t.x.abs() > t.z.abs() {
-            if t.x > 0.0 { Vec3::X } else { -Vec3::X }
+            if t.x > 0.0 {
+                Vec3::X
+            } else {
+                -Vec3::X
+            }
         } else {
-            if t.z > 0.0 { Vec3::Z } else { -Vec3::Z }
+            if t.z > 0.0 {
+                Vec3::Z
+            } else {
+                -Vec3::Z
+            }
         }
     } else {
         min_axis
@@ -170,18 +182,16 @@ pub fn obb_collide(
 
     // Estimate the contact point
     let contact_point = match cross_axis_type {
-        Some(AxisType::Edge(edge_a, edge_b)) => {
-            compute_contact_point_edge(
-                translation1,
-                r1,
-                half_size1,
-                edge_a,
-                translation2,
-                r2,
-                half_size2,
-                edge_b,
-            )
-        }
+        Some(AxisType::Edge(edge_a, edge_b)) => compute_contact_point_edge(
+            translation1,
+            r1,
+            half_size1,
+            edge_a,
+            translation2,
+            r2,
+            half_size2,
+            edge_b,
+        ),
         _ => (translation1 + translation2) * 0.5,
     };
 
@@ -219,12 +229,7 @@ fn compute_contact_point_edge(
 }
 
 /// Helper function to find the closest points on two lines defined by point and direction.
-fn closest_points_on_lines(
-    p1: Vec3,
-    d1: Vec3,
-    p2: Vec3,
-    d2: Vec3,
-) -> (Vec3, Vec3) {
+fn closest_points_on_lines(p1: Vec3, d1: Vec3, p2: Vec3, d2: Vec3) -> (Vec3, Vec3) {
     let r = p1 - p2;
     let a = d1.dot(d1);
     let e = d2.dot(d2);
@@ -237,7 +242,7 @@ fn closest_points_on_lines(
     let s;
     let t;
 
-    if denom.abs() > 1e-6 { 
+    if denom.abs() > 1e-6 {
         s = (b * f - c * e) / denom;
     } else {
         s = 0.0;
@@ -297,7 +302,11 @@ mod obb_tests {
             // Normal can be any unit vector; for simplicity, we check its length.
             assert!(approx_eq_scalar(info.normal.length(), 1.0, 1e-4));
             // Contact point should be the center of the boxes.
-            assert!(approx_eq_vec(info.contact_point, Vec3::new(0.0, 0.0, 0.0), 1e-4));
+            assert!(approx_eq_vec(
+                info.contact_point,
+                Vec3::new(0.0, 0.0, 0.0),
+                1e-4
+            ));
         }
     }
 
@@ -356,7 +365,11 @@ mod obb_tests {
             // The correction should move the smaller box out along the normal
             assert!(info.correction.length() >= 0.0);
             // Contact point should be the center as boxes are concentric
-            assert!(approx_eq_vec(info.contact_point, Vec3::new(0.0, 0.0, 0.0), 1e-4));
+            assert!(approx_eq_vec(
+                info.contact_point,
+                Vec3::new(0.0, 0.0, 0.0),
+                1e-4
+            ));
         }
     }
 

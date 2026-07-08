@@ -1054,7 +1054,11 @@ where
             window_ctx.is_visible = is_visible;
         }
         for window_id in unfocused_windows {
-            if let Some(window_ctx) = self.windows.iter_mut().find(|window| window.window_id == window_id) {
+            if let Some(window_ctx) = self
+                .windows
+                .iter_mut()
+                .find(|window| window.window_id == window_id)
+            {
                 window_ctx.last_cursor_pos = None;
                 window_ctx.wininit_window.set_cursor_visible(true);
             }
@@ -1306,10 +1310,7 @@ where
                         if dx.abs() < 0.01 && dy.abs() < 0.01 {
                             return;
                         }
-                        let event = MouseEvent::Wheel {
-                            dx,
-                            dy,
-                        };
+                        let event = MouseEvent::Wheel { dx, dy };
                         self.engine.on_mouse_input(
                             WindowHandle {
                                 id: window_ctx.window_id,

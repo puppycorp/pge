@@ -93,7 +93,9 @@ pub fn init_logging() {
         _ => log::LevelFilter::Trace,
     };
     if log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(level)).is_ok() {};
+        .map(|()| log::set_max_level(level))
+        .is_ok()
+    {};
 }
 
 pub fn debug_level() -> u8 {

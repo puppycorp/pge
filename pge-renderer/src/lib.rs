@@ -1,5 +1,9 @@
-use pge_core::{CameraDistortion, CameraIntrinsics, CameraProjection, CameraSensorEffects, EntityId, Transform, WorldState};
+use pge_core::{
+    CameraDistortion, CameraIntrinsics, CameraProjection, CameraSensorEffects, EntityId, Transform,
+    WorldState,
+};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RenderView {
@@ -27,6 +31,13 @@ pub enum FrameKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FrameBuffer {
     pub kind: FrameKind,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RgbaFrame {
     pub width: u32,
     pub height: u32,
     pub bytes: Vec<u8>,
@@ -122,7 +133,149 @@ impl Default for RenderSettings {
 }
 
 pub trait Renderer {
-    fn render(&mut self, world: &WorldState, request: &RenderRequest) -> Result<RenderOutput, RenderError>;
+    fn render(
+        &mut self,
+        world: &WorldState,
+        request: &RenderRequest,
+    ) -> Result<RenderOutput, RenderError>;
+}
+
+pub trait OffscreenRenderer {
+    fn render_rgba(
+        &mut self,
+        world: &WorldState,
+        request: &RenderRequest,
+    ) -> Result<RgbaFrame, RenderError>;
+}
+
+pub trait ProfiledRenderer {
+    fn profile_render(
+        &mut self,
+        world: &WorldState,
+        request: &RenderRequest,
+    ) -> Result<RenderPerformanceProfile, RenderError>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PerformanceTiming {
+    pub name: String,
+    pub elapsed_ns: u128,
+}
+
+impl PerformanceTiming {
+    pub fn from_duration(name: impl Into<String>, duration: Duration) -> Self {
+        Self {
+            name: name.into(),
+            elapsed_ns: duration.as_nanos(),
+        }
+    }
+
+    pub fn duration(&self) -> Duration {
+        let nanos = self.elapsed_ns.min(u64::MAX as u128) as u64;
+        Duration::from_nanos(nanos)
+    }
+
+    pub fn ms(&self) -> f64 {
+        self.elapsed_ns as f64 / 1_000_000.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PerformanceCounter {
+    pub name: String,
+    pub value: u64,
+}
+
+impl PerformanceCounter {
+    pub fn new(name: impl Into<String>, value: u64) -> Self {
+        Self {
+            name: name.into(),
+            value,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderPerformanceProfile {
+    pub label: Option<String>,
+    pub frames: usize,
+    pub timings: Vec<PerformanceTiming>,
+    pub counters: Vec<PerformanceCounter>,
+}
+
+impl RenderPerformanceProfile {
+    pub fn new(label: Option<String>, frames: usize) -> Self {
+        Self {
+            label,
+            frames,
+            timings: Vec::new(),
+            counters: Vec::new(),
+        }
+    }
+
+    pub fn labeled(label: impl Into<String>, frames: usize) -> Self {
+        Self::new(Some(label.into()), frames)
+    }
+
+    pub fn unlabeled(frames: usize) -> Self {
+        Self::new(None, frames)
+    }
+
+    pub fn single_frame(label: impl Into<String>) -> Self {
+        Self::labeled(label, 1)
+    }
+
+    pub fn add_timing(&mut self, name: impl Into<String>, duration: Duration) {
+        self.timings
+            .push(PerformanceTiming::from_duration(name, duration));
+    }
+
+    pub fn set_counter(&mut self, name: impl Into<String>, value: u64) {
+        let name = name.into();
+        if let Some(counter) = self
+            .counters
+            .iter_mut()
+            .find(|counter| counter.name == name)
+        {
+            counter.value = value;
+        } else {
+            self.counters.push(PerformanceCounter::new(name, value));
+        }
+    }
+
+    pub fn timing(&self, name: &str) -> Option<&PerformanceTiming> {
+        self.timings.iter().find(|timing| timing.name == name)
+    }
+
+    pub fn counter(&self, name: &str) -> Option<u64> {
+        self.counters
+            .iter()
+            .find(|counter| counter.name == name)
+            .map(|counter| counter.value)
+    }
+
+    pub fn avg_timing_ms(&self, name: &str) -> Option<f64> {
+        let frames = self.frames.max(1) as f64;
+        self.timing(name).map(|timing| timing.ms() / frames)
+    }
+
+    pub fn accumulate(&mut self, other: &RenderPerformanceProfile) {
+        self.frames += other.frames;
+        for timing in &other.timings {
+            if let Some(existing) = self
+                .timings
+                .iter_mut()
+                .find(|existing| existing.name == timing.name)
+            {
+                existing.elapsed_ns += timing.elapsed_ns;
+            } else {
+                self.timings.push(timing.clone());
+            }
+        }
+        for counter in &other.counters {
+            self.set_counter(counter.name.clone(), counter.value);
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -150,7 +303,11 @@ impl std::error::Error for RenderError {}
 pub struct NullRenderer;
 
 impl Renderer for NullRenderer {
-    fn render(&mut self, _world: &WorldState, request: &RenderRequest) -> Result<RenderOutput, RenderError> {
+    fn render(
+        &mut self,
+        _world: &WorldState,
+        request: &RenderRequest,
+    ) -> Result<RenderOutput, RenderError> {
         Ok(RenderOutput {
             metadata: RenderMetadata {
                 timestamp_sec: 0.0,
@@ -166,5 +323,34 @@ impl Renderer for NullRenderer {
             },
             frames: Vec::new(),
         })
+    }
+}
+
+impl OffscreenRenderer for NullRenderer {
+    fn render_rgba(
+        &mut self,
+        _world: &WorldState,
+        request: &RenderRequest,
+    ) -> Result<RgbaFrame, RenderError> {
+        let width = request.resolution[0].max(1);
+        let height = request.resolution[1].max(1);
+        Ok(RgbaFrame {
+            width,
+            height,
+            bytes: vec![0; (width * height * 4) as usize],
+        })
+    }
+}
+
+impl ProfiledRenderer for NullRenderer {
+    fn profile_render(
+        &mut self,
+        _world: &WorldState,
+        request: &RenderRequest,
+    ) -> Result<RenderPerformanceProfile, RenderError> {
+        let mut profile = RenderPerformanceProfile::single_frame("null-renderer");
+        profile.set_counter("resolutionWidth", request.resolution[0] as u64);
+        profile.set_counter("resolutionHeight", request.resolution[1] as u64);
+        Ok(profile)
     }
 }

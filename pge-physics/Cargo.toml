@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 pge-core = { path = "../pge-core" }
+rapier3d = { version = "0.23", default-features = false, features = ["dim3", "f32"] }

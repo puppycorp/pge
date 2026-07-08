@@ -1,6 +1,10 @@
 use std::fmt;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use pge_core::WorldState;
+use pge_renderer::{OffscreenRenderer, RenderError, RenderRequest};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PngSequence {
@@ -109,6 +113,13 @@ pub enum VideoError {
         path: PathBuf,
         source: std::io::Error,
     },
+    WriteFrame {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Render {
+        source: RenderError,
+    },
     Launch {
         source: std::io::Error,
     },
@@ -124,6 +135,10 @@ impl fmt::Display for VideoError {
             Self::CreateOutputDirectory { path, source } => {
                 write!(f, "create output directory {}: {source}", path.display())
             }
+            Self::WriteFrame { path, source } => {
+                write!(f, "write video frame {}: {source}", path.display())
+            }
+            Self::Render { source } => write!(f, "render video frame: {source}"),
             Self::Launch { source } => write!(f, "launch gst-launch-1.0: {source}"),
             Self::EncoderFailed { status } => write!(f, "gst-launch-1.0 failed with {status}"),
         }
@@ -134,9 +149,105 @@ impl std::error::Error for VideoError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::CreateOutputDirectory { source, .. } => Some(source),
+            Self::WriteFrame { source, .. } => Some(source),
+            Self::Render { source } => Some(source),
             Self::Launch { source } => Some(source),
             Self::EmptySequence | Self::EncoderFailed { .. } => None,
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VideoRecordRequest {
+    pub output: PathBuf,
+    pub fps: u32,
+    pub frame_count: u32,
+    pub work_dir: PathBuf,
+    pub bitrate: u32,
+}
+
+impl VideoRecordRequest {
+    pub fn mp4(
+        output: impl Into<PathBuf>,
+        fps: u32,
+        frame_count: u32,
+        work_dir: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            output: output.into(),
+            fps,
+            frame_count,
+            work_dir: work_dir.into(),
+            bitrate: 4_000_000,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VideoRecordOutput {
+    pub output: PathBuf,
+    pub frame_count: u32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct VideoRecorder;
+
+impl VideoRecorder {
+    pub fn record<R, F>(
+        &self,
+        renderer: &mut R,
+        world: &mut WorldState,
+        render_request: &RenderRequest,
+        request: &VideoRecordRequest,
+        mut update: F,
+    ) -> Result<VideoRecordOutput, VideoError>
+    where
+        R: OffscreenRenderer,
+        F: FnMut(u32, &mut WorldState),
+    {
+        if request.frame_count == 0 {
+            return Err(VideoError::EmptySequence);
+        }
+        std::fs::create_dir_all(&request.work_dir).map_err(|source| {
+            VideoError::CreateOutputDirectory {
+                path: request.work_dir.clone(),
+                source,
+            }
+        })?;
+
+        let resolution = render_request.resolution;
+        for index in 0..request.frame_count {
+            update(index, world);
+            let frame = renderer
+                .render_rgba(world, render_request)
+                .map_err(|source| VideoError::Render { source })?;
+            let path = request.work_dir.join(format!("frame-{index:05}.rgba"));
+            let mut file =
+                std::fs::File::create(&path).map_err(|source| VideoError::WriteFrame {
+                    path: path.clone(),
+                    source,
+                })?;
+            file.write_all(&frame.bytes)
+                .map_err(|source| VideoError::WriteFrame {
+                    path: path.clone(),
+                    source,
+                })?;
+        }
+
+        let mut encode_request = RawRgbaMp4EncodeRequest::raw_rgba_sequence(
+            request.work_dir.clone(),
+            request.frame_count,
+            resolution[0],
+            resolution[1],
+            request.fps,
+            request.output.clone(),
+        );
+        encode_request.bitrate = request.bitrate;
+        encode_raw_rgba_sequence_to_mp4(&encode_request)?;
+        Ok(VideoRecordOutput {
+            output: request.output.clone(),
+            frame_count: request.frame_count,
+        })
     }
 }
 

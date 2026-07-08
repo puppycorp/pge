@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-use std::path::Path;
+use crate::arena::*;
 use crate::load_gltf;
 use crate::load_urdf;
-use crate::arena::*;
 use crate::types::*;
 use crate::utility::get_scene_bounding_box;
 use crate::GUIElement;
 use crate::Window;
+use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
 pub struct State {
@@ -24,7 +24,7 @@ pub struct State {
     pub materials: Arena<Material>,
     pub joints: Arena<Joint>,
     pub keyboard: Option<Keyboard>,
-	pub screenshot_request: Option<(ArenaId<Window>, String)>,
+    pub screenshot_request: Option<(ArenaId<Window>, String)>,
 }
 
 impl State {
@@ -45,8 +45,16 @@ impl State {
         let new_node_id = self.nodes.insert(new_node);
         let mut stack = vec![(node_id, new_node_id.clone())];
         while let Some((orig_id, new_parent_id)) = stack.pop() {
-            let children: Vec<_> = self.nodes.iter()
-                .filter_map(|(id, n)| if n.parent == NodeParent::Node(orig_id) { Some(id) } else { None })
+            let children: Vec<_> = self
+                .nodes
+                .iter()
+                .filter_map(|(id, n)| {
+                    if n.parent == NodeParent::Node(orig_id) {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                })
                 .collect();
             for child_id in children {
                 let child = self.nodes.get(&child_id).expect("Child node not found");
@@ -56,7 +64,7 @@ impl State {
                 stack.push((child_id, new_child_id));
             }
         }
-    
+
         new_node_id
     }
 
@@ -86,9 +94,9 @@ impl State {
         crate::log2!("joint count: {:?}", self.joints.len());
     }
 
-	pub fn get_scene_bounding_box(&self, scene_id: ArenaId<Scene>) -> AABB {
-		get_scene_bounding_box(scene_id, self)
-	}
+    pub fn get_scene_bounding_box(&self, scene_id: ArenaId<Scene>) -> AABB {
+        get_scene_bounding_box(scene_id, self)
+    }
 }
 
 #[cfg(test)]
@@ -108,9 +116,9 @@ mod tests {
         let mut state = State::default();
         let original_node = Node::new();
         let original_id = state.nodes.insert(original_node);
-        
+
         let cloned_id = state.clone_node(original_id);
-        
+
         assert_ne!(original_id, cloned_id);
         assert!(state.nodes.contains(&cloned_id));
     }
