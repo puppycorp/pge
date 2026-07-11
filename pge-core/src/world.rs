@@ -39,6 +39,17 @@ pub struct EntityMetadata {
     pub link_name: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TextLabel {
+    pub entity: EntityId,
+    pub text: String,
+    pub position: [f32; 3],
+    pub color: [f32; 4],
+    pub background_color: [f32; 4],
+    pub font_size_px: f32,
+    pub billboard: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum BodyKind {
     Static,
@@ -333,6 +344,7 @@ pub struct WorldState {
     pub lights: Arena<Light>,
     pub joints: Arena<Joint>,
     pub entities: Vec<EntityMetadata>,
+    pub text_labels: Vec<TextLabel>,
 }
 
 impl WorldState {

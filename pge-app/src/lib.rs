@@ -243,6 +243,60 @@ impl FpsOverlayRenderer {
     }
 }
 
+struct TextOverlayRenderer {
+    pipeline: wgpu::RenderPipeline,
+}
+
+impl TextOverlayRenderer {
+    fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+        Self {
+            pipeline: FpsOverlayRenderer::new(device, target_format).pipeline,
+        }
+    }
+
+    fn render(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view: &wgpu::TextureView,
+        resolution: [u32; 2],
+        labels: &[pge_core::TextLabel],
+    ) {
+        let vertices = text_overlay_vertices(labels, resolution);
+        if vertices.is_empty() {
+            return;
+        }
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("pge text overlay vertices"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("pge text overlay encoder"),
+        });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("pge text overlay pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            pass.draw(0..vertices.len() as u32, 0..1);
+        }
+        queue.submit(std::iter::once(encoder.finish()));
+    }
+}
+
 const FPS_OVERLAY_SHADER: &str = r#"
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
@@ -319,6 +373,69 @@ fn fps_overlay_vertices(text: &str, resolution: [u32; 2]) -> Vec<OverlayVertex> 
     vertices
 }
 
+fn text_overlay_vertices(
+    labels: &[pge_core::TextLabel],
+    resolution: [u32; 2],
+) -> Vec<OverlayVertex> {
+    let width = resolution[0].max(1) as f32;
+    let height = resolution[1].max(1) as f32;
+    let mut vertices = Vec::new();
+    let margin = 12.0_f32;
+    let mut y = margin;
+    for label in labels.iter().take(24) {
+        let scale = (label.font_size_px.max(8.0) / 7.0).clamp(1.0, 5.0);
+        let glyph_w = 5.0 * scale;
+        let glyph_h = 7.0 * scale;
+        let spacing = scale;
+        let padding = 4.0_f32;
+        let text = label.text.to_uppercase();
+        let glyph_count = text.chars().filter_map(glyph_rows).count();
+        if glyph_count == 0 {
+            continue;
+        }
+        let text_width =
+            glyph_count.saturating_sub(1) as f32 * spacing + glyph_count as f32 * glyph_w;
+        push_overlay_rect(
+            &mut vertices,
+            [width, height],
+            margin - padding,
+            y - padding,
+            text_width + padding * 2.0,
+            glyph_h + padding * 2.0,
+            label.background_color,
+        );
+        let mut cursor_x = margin;
+        for ch in text.chars() {
+            let Some(rows) = glyph_rows(ch) else {
+                continue;
+            };
+            for (row_index, row_bits) in rows.iter().enumerate() {
+                for col in 0..5 {
+                    let bit = 1 << (4 - col);
+                    if row_bits & bit == 0 {
+                        continue;
+                    }
+                    push_overlay_rect(
+                        &mut vertices,
+                        [width, height],
+                        cursor_x + col as f32 * scale,
+                        y + row_index as f32 * scale,
+                        scale,
+                        scale,
+                        label.color,
+                    );
+                }
+            }
+            cursor_x += glyph_w + spacing;
+        }
+        y += glyph_h + padding * 2.0 + 4.0;
+        if y > height - glyph_h {
+            break;
+        }
+    }
+    vertices
+}
+
 fn glyph_rows(ch: char) -> Option<[u8; 7]> {
     match ch {
         '0' => Some([
@@ -359,6 +476,87 @@ fn glyph_rows(ch: char) -> Option<[u8; 7]> {
         ]),
         'S' => Some([
             0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110,
+        ]),
+        'A' => Some([
+            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ]),
+        'B' => Some([
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
+        ]),
+        'C' => Some([
+            0b01111, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b01111,
+        ]),
+        'D' => Some([
+            0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110,
+        ]),
+        'E' => Some([
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+        ]),
+        'G' => Some([
+            0b01111, 0b10000, 0b10000, 0b10011, 0b10001, 0b10001, 0b01111,
+        ]),
+        'H' => Some([
+            0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ]),
+        'I' => Some([
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b11111,
+        ]),
+        'J' => Some([
+            0b00111, 0b00010, 0b00010, 0b00010, 0b10010, 0b10010, 0b01100,
+        ]),
+        'K' => Some([
+            0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
+        ]),
+        'L' => Some([
+            0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
+        ]),
+        'M' => Some([
+            0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001,
+        ]),
+        'N' => Some([
+            0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001,
+        ]),
+        'O' => Some([
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ]),
+        'Q' => Some([
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101,
+        ]),
+        'R' => Some([
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
+        ]),
+        'T' => Some([
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ]),
+        'U' => Some([
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ]),
+        'V' => Some([
+            0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b01010, 0b00100,
+        ]),
+        'W' => Some([
+            0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001,
+        ]),
+        'X' => Some([
+            0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b01010, 0b10001,
+        ]),
+        'Y' => Some([
+            0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ]),
+        'Z' => Some([
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
+        ]),
+        ':' => Some([
+            0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000,
+        ]),
+        '.' => Some([
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100,
+        ]),
+        '/' => Some([
+            0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000,
+        ]),
+        '+' => Some([
+            0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000,
         ]),
         '-' => Some([
             0b00000, 0b00000, 0b00000, 0b11110, 0b00000, 0b00000, 0b00000,
@@ -455,6 +653,7 @@ where
     depth_view: Option<wgpu::TextureView>,
     renderer: Option<WgpuRenderer>,
     fps_overlay: Option<FpsOverlayRenderer>,
+    text_overlay: Option<TextOverlayRenderer>,
     frame_index: u64,
     start: std::time::Instant,
     last_frame_instant: Option<std::time::Instant>,
@@ -485,6 +684,7 @@ where
             depth_view: None,
             renderer: None,
             fps_overlay: None,
+            text_overlay: None,
             frame_index: 0,
             start: std::time::Instant::now(),
             last_frame_instant: None,
@@ -568,6 +768,7 @@ where
         surface.configure(&device, &surface_config);
         let renderer = WgpuRenderer::from_device(device, queue, surface_format);
         let fps_overlay = FpsOverlayRenderer::new(renderer.device(), surface_format);
+        let text_overlay = TextOverlayRenderer::new(renderer.device(), surface_format);
         let depth_view = create_depth_view(renderer.device(), [width, height]);
         self.request.resolution = [width, height];
         self.window = Some(window);
@@ -576,6 +777,7 @@ where
         self.depth_view = Some(depth_view);
         self.renderer = Some(renderer);
         self.fps_overlay = Some(fps_overlay);
+        self.text_overlay = Some(text_overlay);
         Ok(())
     }
 
@@ -667,6 +869,15 @@ where
                 &view,
                 [config.width, config.height],
                 self.smoothed_fps,
+            );
+        }
+        if let Some(text_overlay) = self.text_overlay.as_ref() {
+            text_overlay.render(
+                renderer.device(),
+                renderer.queue(),
+                &view,
+                [config.width, config.height],
+                &self.world.text_labels,
             );
         }
         self.input.left_drag_delta_px = [0.0, 0.0];
