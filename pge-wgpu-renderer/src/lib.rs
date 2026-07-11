@@ -134,8 +134,13 @@ pub struct WgpuRenderer {
     object_buffer: wgpu::Buffer,
     object_buffer_capacity: usize,
     object_bind_group: wgpu::BindGroup,
+    // Static world meshes share source-keyed GPU data. The mesh-to-key map
+    // lets an animated procedural mesh release its old source entry when its
+    // dimensions change, avoiding cache growth across poses.
     mesh_cache: HashMap<String, Vec<MeshData>>,
     gpu_cache: HashMap<String, Vec<GpuMesh>>,
+    mesh_cache_keys: HashMap<ArenaId<Mesh>, String>,
+    mesh_cache_ref_counts: HashMap<String, usize>,
     render_targets: HashMap<[u32; 2], RenderTarget>,
 }
 
@@ -154,6 +159,15 @@ impl WgpuRenderer {
             })
             .await
             .ok_or_else(|| RenderError::new("no WGPU adapter available"))?;
+        let adapter_info = adapter.get_info();
+        eprintln!(
+            "PGE offscreen WGPU adapter: name={} type={:?} backend={:?} driver={} ({})",
+            adapter_info.name,
+            adapter_info.device_type,
+            adapter_info.backend,
+            adapter_info.driver,
+            adapter_info.driver_info,
+        );
         let (device, queue) = adapter
             .request_device(&default_device_descriptor(), None)
             .await
@@ -288,6 +302,8 @@ impl WgpuRenderer {
             object_bind_group,
             mesh_cache: HashMap::new(),
             gpu_cache: HashMap::new(),
+            mesh_cache_keys: HashMap::new(),
+            mesh_cache_ref_counts: HashMap::new(),
             render_targets: HashMap::new(),
         }
     }
@@ -842,6 +858,15 @@ impl WgpuRenderer {
         mesh_id: ArenaId<Mesh>,
         key: &str,
     ) -> Result<(), RenderError> {
+        if let Some(evicted_key) = update_mesh_cache_assignment(
+            &mut self.mesh_cache_keys,
+            &mut self.mesh_cache_ref_counts,
+            mesh_id,
+            key,
+        ) {
+            self.mesh_cache.remove(&evicted_key);
+            self.gpu_cache.remove(&evicted_key);
+        }
         if self.gpu_cache.contains_key(key) {
             return Ok(());
         }
@@ -894,7 +919,8 @@ impl WgpuRenderer {
                     load_gltf_meshes(path, *scale, fallback_color)?
                 }
             };
-            self.mesh_cache.insert(key.to_string(), data);
+            self.mesh_cache
+                .insert(key.to_string(), merge_mesh_data_by_color(data));
         }
         Ok(self.mesh_cache.get(key).expect("mesh cache populated"))
     }
@@ -1072,6 +1098,37 @@ fn camera_view_projection(
     Ok(projection * Mat4::look_to_rh(eye, forward, up))
 }
 
+fn update_mesh_cache_assignment(
+    assignments: &mut HashMap<ArenaId<Mesh>, String>,
+    ref_counts: &mut HashMap<String, usize>,
+    mesh_id: ArenaId<Mesh>,
+    key: &str,
+) -> Option<String> {
+    if assignments
+        .get(&mesh_id)
+        .is_some_and(|current| current == key)
+    {
+        return None;
+    }
+
+    let evicted_key = assignments
+        .insert(mesh_id, key.to_string())
+        .and_then(|previous_key| {
+            let Some(count) = ref_counts.get_mut(&previous_key) else {
+                return None;
+            };
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                ref_counts.remove(&previous_key);
+                Some(previous_key)
+            } else {
+                None
+            }
+        });
+    *ref_counts.entry(key.to_string()).or_default() += 1;
+    evicted_key
+}
+
 fn mesh_key(world: &WorldState, mesh_id: ArenaId<Mesh>) -> Result<String, RenderError> {
     let mesh = world
         .meshes
@@ -1098,6 +1155,30 @@ fn procedural_mesh(geometry: &Geometry, color: [f32; 4]) -> Vec<MeshData> {
         Geometry::Sphere { radius } => vec![sphere_mesh(*radius, color)],
         Geometry::Cylinder { radius, height } => vec![cylinder_mesh(*radius, *height, color)],
     }
+}
+
+fn merge_mesh_data_by_color(meshes: Vec<MeshData>) -> Vec<MeshData> {
+    let mut merged: Vec<MeshData> = Vec::new();
+    for mesh in meshes {
+        let Some(existing) = merged
+            .iter_mut()
+            .find(|existing| existing.color == mesh.color)
+        else {
+            merged.push(mesh);
+            continue;
+        };
+        let vertex_offset = u32::try_from(existing.vertices.len())
+            .expect("combined mesh vertex count fits u32 indices");
+        existing.vertices.extend(mesh.vertices);
+        existing
+            .indices
+            .extend(mesh.indices.into_iter().map(|index| {
+                index
+                    .checked_add(vertex_offset)
+                    .expect("combined mesh index fits u32")
+            }));
+    }
+    merged
 }
 
 fn box_mesh(size: [f32; 3], color: [f32; 4]) -> MeshData {
@@ -1273,4 +1354,73 @@ fn encode_png_rgba(resolution: [u32; 2], rgba: &[u8]) -> Result<Vec<u8>, RenderE
             .map_err(|err| RenderError::new(format!("write PNG data: {err}")))?;
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_procedural_mesh_evicts_its_previous_cache_entry() {
+        let mut world = WorldState::default();
+        let mesh_id = world.meshes.insert(Mesh {
+            name: None,
+            source: MeshSource::Procedural(Geometry::Box {
+                size: [0.1, 0.006, 0.006],
+            }),
+            material: None,
+        });
+        let initial_key = mesh_key(&world, mesh_id).expect("initial mesh cache key");
+        let mut assignments = HashMap::new();
+        let mut ref_counts = HashMap::new();
+        assert_eq!(
+            update_mesh_cache_assignment(&mut assignments, &mut ref_counts, mesh_id, &initial_key),
+            None
+        );
+
+        let Some(mesh) = world.meshes.get_mut(&mesh_id) else {
+            panic!("mesh exists");
+        };
+        let MeshSource::Procedural(Geometry::Box { size }) = &mut mesh.source else {
+            panic!("test mesh is a box");
+        };
+        size[0] = 0.42;
+        let updated_key = mesh_key(&world, mesh_id).expect("updated mesh cache key");
+
+        assert_eq!(
+            update_mesh_cache_assignment(&mut assignments, &mut ref_counts, mesh_id, &updated_key),
+            Some(initial_key)
+        );
+        assert_eq!(assignments.get(&mesh_id), Some(&updated_key));
+        assert_eq!(ref_counts.get(&updated_key), Some(&1));
+    }
+
+    #[test]
+    fn mesh_primitives_with_matching_colors_are_combined() {
+        let color = [0.2, 0.4, 0.6, 1.0];
+        let meshes = vec![
+            MeshData {
+                vertices: vec![Vertex::zeroed(), Vertex::zeroed(), Vertex::zeroed()],
+                indices: vec![0, 1, 2],
+                color,
+            },
+            MeshData {
+                vertices: vec![Vertex::zeroed(), Vertex::zeroed(), Vertex::zeroed()],
+                indices: vec![0, 1, 2],
+                color,
+            },
+            MeshData {
+                vertices: vec![Vertex::zeroed(), Vertex::zeroed(), Vertex::zeroed()],
+                indices: vec![0, 1, 2],
+                color: [0.8, 0.1, 0.3, 1.0],
+            },
+        ];
+
+        let merged = merge_mesh_data_by_color(meshes);
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].vertices.len(), 6);
+        assert_eq!(merged[0].indices, vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(merged[1].vertices.len(), 3);
+    }
 }

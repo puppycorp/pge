@@ -245,32 +245,127 @@ impl FpsOverlayRenderer {
 
 struct TextOverlayRenderer {
     pipeline: wgpu::RenderPipeline,
+    cached_labels: Vec<pge_core::TextLabel>,
+    cached_resolution: [u32; 2],
+    vertex_buffer: Option<wgpu::Buffer>,
+    vertex_count: u32,
+}
+
+/// Opt-in timing for a native WGPU window frame.  The renderer profile covers
+/// offscreen work only; this additionally exposes surface acquisition,
+/// presentation, and PGE overlays when diagnosing a live desktop preview.
+struct WindowProfile {
+    started_at: std::time::Instant,
+    frames: u64,
+    update: std::time::Duration,
+    acquire: std::time::Duration,
+    scene: std::time::Duration,
+    fps_overlay: std::time::Duration,
+    text_overlay: std::time::Duration,
+    present: std::time::Duration,
+    redraw: std::time::Duration,
+}
+
+impl WindowProfile {
+    fn from_environment() -> Option<Self> {
+        std::env::var_os("PGE_WINDOW_PROFILE").map(|_| Self {
+            started_at: std::time::Instant::now(),
+            frames: 0,
+            update: std::time::Duration::ZERO,
+            acquire: std::time::Duration::ZERO,
+            scene: std::time::Duration::ZERO,
+            fps_overlay: std::time::Duration::ZERO,
+            text_overlay: std::time::Duration::ZERO,
+            present: std::time::Duration::ZERO,
+            redraw: std::time::Duration::ZERO,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record(
+        &mut self,
+        update: std::time::Duration,
+        acquire: std::time::Duration,
+        scene: std::time::Duration,
+        fps_overlay: std::time::Duration,
+        text_overlay: std::time::Duration,
+        present: std::time::Duration,
+        redraw: std::time::Duration,
+    ) {
+        self.frames += 1;
+        self.update += update;
+        self.acquire += acquire;
+        self.scene += scene;
+        self.fps_overlay += fps_overlay;
+        self.text_overlay += text_overlay;
+        self.present += present;
+        self.redraw += redraw;
+
+        let elapsed = self.started_at.elapsed();
+        if elapsed < std::time::Duration::from_secs(1) {
+            return;
+        }
+        let frames = self.frames.max(1) as f64;
+        let avg_ms = |duration: std::time::Duration| duration.as_secs_f64() * 1_000.0 / frames;
+        eprintln!(
+            "PGE window profile: {:.1} fps; avg ms update={:.3} acquire={:.3} scene={:.3} fps-overlay={:.3} text-overlay={:.3} present={:.3} redraw={:.3}; frames={}",
+            frames / elapsed.as_secs_f64(),
+            avg_ms(self.update),
+            avg_ms(self.acquire),
+            avg_ms(self.scene),
+            avg_ms(self.fps_overlay),
+            avg_ms(self.text_overlay),
+            avg_ms(self.present),
+            avg_ms(self.redraw),
+            self.frames,
+        );
+        self.started_at = std::time::Instant::now();
+        self.frames = 0;
+        self.update = std::time::Duration::ZERO;
+        self.acquire = std::time::Duration::ZERO;
+        self.scene = std::time::Duration::ZERO;
+        self.fps_overlay = std::time::Duration::ZERO;
+        self.text_overlay = std::time::Duration::ZERO;
+        self.present = std::time::Duration::ZERO;
+        self.redraw = std::time::Duration::ZERO;
+    }
 }
 
 impl TextOverlayRenderer {
     fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         Self {
             pipeline: FpsOverlayRenderer::new(device, target_format).pipeline,
+            cached_labels: Vec::new(),
+            cached_resolution: [0, 0],
+            vertex_buffer: None,
+            vertex_count: 0,
         }
     }
 
     fn render(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         view: &wgpu::TextureView,
         resolution: [u32; 2],
         labels: &[pge_core::TextLabel],
     ) {
-        let vertices = text_overlay_vertices(labels, resolution);
-        if vertices.is_empty() {
-            return;
+        if self.cached_resolution != resolution || self.cached_labels != labels {
+            let vertices = text_overlay_vertices(labels, resolution);
+            self.vertex_count = vertices.len() as u32;
+            self.vertex_buffer = (!vertices.is_empty()).then(|| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("pge text overlay vertices"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+            });
+            self.cached_labels = labels.to_vec();
+            self.cached_resolution = resolution;
         }
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("pge text overlay vertices"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let Some(vertex_buffer) = &self.vertex_buffer else {
+            return;
+        };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("pge text overlay encoder"),
         });
@@ -291,7 +386,7 @@ impl TextOverlayRenderer {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            pass.draw(0..vertices.len() as u32, 0..1);
+            pass.draw(0..self.vertex_count, 0..1);
         }
         queue.submit(std::iter::once(encoder.finish()));
     }
@@ -658,6 +753,7 @@ where
     start: std::time::Instant,
     last_frame_instant: Option<std::time::Instant>,
     smoothed_fps: f32,
+    window_profile: Option<WindowProfile>,
     last_error: Option<RenderError>,
     input: WindowInputState,
     last_cursor_position_px: Option<[f32; 2]>,
@@ -689,6 +785,7 @@ where
             start: std::time::Instant::now(),
             last_frame_instant: None,
             smoothed_fps: 0.0,
+            window_profile: WindowProfile::from_environment(),
             last_error: None,
             input: WindowInputState::default(),
             last_cursor_position_px: None,
@@ -716,12 +813,42 @@ where
         let surface = instance
             .create_surface(window.clone())
             .map_err(|err| RenderError::new(format!("create WGPU surface: {err}")))?;
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
+        let adapter_name_override = std::env::var_os("WGPU_ADAPTER_NAME");
+        let power_preference_override = std::env::var_os("WGPU_POWER_PREF");
+        let adapter = if adapter_name_override.is_some() || power_preference_override.is_some() {
+            // WGPU's helper enumerates adapters when WGPU_ADAPTER_NAME is
+            // supplied, so a desktop test can explicitly select the NVIDIA
+            // adapter while still requiring compatibility with this surface.
+            pollster::block_on(wgpu::util::initialize_adapter_from_env_or_default(
+                &instance,
+                Some(&surface),
+            ))
+        } else {
+            // Keep the established production default. The WGPU helper's
+            // fallback uses its own default power preference, which need not
+            // be HighPerformance.
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            }))
+        }
         .ok_or_else(|| RenderError::new("no WGPU adapter available for window surface"))?;
+        let adapter_info = adapter.get_info();
+        eprintln!(
+            "PGE window WGPU adapter: name={} type={:?} backend={:?} driver={} ({})",
+            adapter_info.name,
+            adapter_info.device_type,
+            adapter_info.backend,
+            adapter_info.driver,
+            adapter_info.driver_info,
+        );
+        if let Some(name) = adapter_name_override {
+            eprintln!(
+                "PGE window WGPU adapter selected with WGPU_ADAPTER_NAME={:?}",
+                name
+            );
+        }
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
@@ -803,6 +930,7 @@ where
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
+        let redraw_start = std::time::Instant::now();
         let now = std::time::Instant::now();
         if let Some(previous) = self.last_frame_instant.replace(now) {
             let dt = now.duration_since(previous).as_secs_f32();
@@ -820,6 +948,7 @@ where
             elapsed_sec: self.start.elapsed().as_secs_f64(),
             input: self.input,
         };
+        let update_start = std::time::Instant::now();
         match (self.update)(&mut self.world, context) {
             Ok(true) => {}
             Ok(false) => {
@@ -832,6 +961,7 @@ where
                 return;
             }
         }
+        let update_elapsed = update_start.elapsed();
 
         let (Some(surface), Some(config), Some(depth_view), Some(renderer)) = (
             self.surface.as_ref(),
@@ -841,6 +971,7 @@ where
         ) else {
             return;
         };
+        let acquire_start = std::time::Instant::now();
         let output = match surface.get_current_texture() {
             Ok(output) => output,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -854,14 +985,18 @@ where
                 return;
             }
         };
+        let acquire_elapsed = acquire_start.elapsed();
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let scene_start = std::time::Instant::now();
         if let Err(err) = renderer.render_to_view(&self.world, &self.request, &view, depth_view) {
             self.last_error = Some(err);
             event_loop.exit();
             return;
         }
+        let scene_elapsed = scene_start.elapsed();
+        let fps_overlay_start = std::time::Instant::now();
         if let Some(fps_overlay) = self.fps_overlay.as_ref() {
             fps_overlay.render(
                 renderer.device(),
@@ -871,7 +1006,9 @@ where
                 self.smoothed_fps,
             );
         }
-        if let Some(text_overlay) = self.text_overlay.as_ref() {
+        let fps_overlay_elapsed = fps_overlay_start.elapsed();
+        let text_overlay_start = std::time::Instant::now();
+        if let Some(text_overlay) = self.text_overlay.as_mut() {
             text_overlay.render(
                 renderer.device(),
                 renderer.queue(),
@@ -880,11 +1017,25 @@ where
                 &self.world.text_labels,
             );
         }
+        let text_overlay_elapsed = text_overlay_start.elapsed();
         self.input.left_drag_delta_px = [0.0, 0.0];
         self.input.middle_drag_delta_px = [0.0, 0.0];
         self.input.right_drag_delta_px = [0.0, 0.0];
         self.input.scroll_delta_lines = 0.0;
+        let present_start = std::time::Instant::now();
         output.present();
+        let present_elapsed = present_start.elapsed();
+        if let Some(profile) = self.window_profile.as_mut() {
+            profile.record(
+                update_elapsed,
+                acquire_elapsed,
+                scene_elapsed,
+                fps_overlay_elapsed,
+                text_overlay_elapsed,
+                present_elapsed,
+                redraw_start.elapsed(),
+            );
+        }
         self.frame_index += 1;
     }
 
