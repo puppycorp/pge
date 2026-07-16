@@ -148,4 +148,36 @@ mod tests {
             "Fast object fell through the floor"
         );
     }
+
+    #[test]
+    fn window_overlay_lines_are_bounded() {
+        let overlay = WindowOverlayLines::default();
+        overlay.set(vec![
+            "A".repeat(40),
+            "SECOND".to_string(),
+            "THIRD".to_string(),
+            "FOURTH".to_string(),
+            "FIFTH".to_string(),
+        ]);
+
+        let lines = overlay.snapshot();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0].chars().count(), 32);
+        assert_eq!(lines[3], "FOURTH");
+    }
+
+    #[test]
+    fn additional_window_overlay_line_renders_below_fps() {
+        let fps_only = fps_overlay_vertices("120 FPS", &[], [960, 540]);
+        let with_ups = fps_overlay_vertices("120 FPS", &["SIM 5.0 UPS".to_string()], [960, 540]);
+        let lowest_y = |vertices: &[OverlayVertex]| {
+            vertices
+                .iter()
+                .map(|vertex| vertex.position[1])
+                .fold(f32::INFINITY, f32::min)
+        };
+
+        assert!(with_ups.len() > fps_only.len());
+        assert!(lowest_y(&with_ups) < lowest_y(&fps_only));
+    }
 }

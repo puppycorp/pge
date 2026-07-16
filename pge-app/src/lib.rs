@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bytemuck::{Pod, Zeroable};
 
@@ -98,6 +98,30 @@ impl Default for WindowRenderConfig {
             title: "PGE WGPU Renderer".to_string(),
             resolution: [640, 360],
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct WindowOverlayLines {
+    lines: Arc<Mutex<Vec<String>>>,
+}
+
+impl WindowOverlayLines {
+    pub fn set(&self, lines: Vec<String>) {
+        if let Ok(mut current) = self.lines.lock() {
+            *current = lines
+                .into_iter()
+                .take(4)
+                .map(|line| line.chars().take(32).collect())
+                .collect();
+        }
+    }
+
+    fn snapshot(&self) -> Vec<String> {
+        self.lines
+            .lock()
+            .map(|lines| lines.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -202,13 +226,14 @@ impl FpsOverlayRenderer {
         view: &wgpu::TextureView,
         resolution: [u32; 2],
         fps: f32,
+        additional_lines: &[String],
     ) {
         let text = if fps > 0.0 {
             format!("{fps:.0} FPS")
         } else {
             "-- FPS".to_string()
         };
-        let vertices = fps_overlay_vertices(&text, resolution);
+        let vertices = fps_overlay_vertices(&text, additional_lines, resolution);
         if vertices.is_empty() {
             return;
         }
@@ -412,7 +437,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 }
 "#;
 
-fn fps_overlay_vertices(text: &str, resolution: [u32; 2]) -> Vec<OverlayVertex> {
+fn fps_overlay_vertices(
+    fps_text: &str,
+    additional_lines: &[String],
+    resolution: [u32; 2],
+) -> Vec<OverlayVertex> {
     let width = resolution[0].max(1) as f32;
     let height = resolution[1].max(1) as f32;
     let scale = 3.0_f32;
@@ -421,49 +450,52 @@ fn fps_overlay_vertices(text: &str, resolution: [u32; 2]) -> Vec<OverlayVertex> 
     let spacing = scale;
     let margin = 12.0_f32;
     let padding = 6.0_f32;
-    let text_width = text
-        .chars()
-        .filter_map(glyph_rows)
-        .count()
-        .saturating_sub(1) as f32
-        * spacing
-        + text.chars().filter_map(glyph_rows).count() as f32 * glyph_w;
-    let x = (width - margin - text_width).max(margin);
-    let y = margin;
-
     let mut vertices = Vec::new();
-    push_overlay_rect(
-        &mut vertices,
-        [width, height],
-        x - padding,
-        y - padding,
-        text_width + padding * 2.0,
-        glyph_h + padding * 2.0,
-        [0.0, 0.0, 0.0, 0.48],
-    );
-    let mut cursor_x = x;
-    for ch in text.chars() {
-        let Some(rows) = glyph_rows(ch) else {
+    for (line_index, text) in std::iter::once(fps_text)
+        .chain(additional_lines.iter().map(String::as_str))
+        .enumerate()
+    {
+        let glyph_count = text.chars().filter_map(glyph_rows).count();
+        if glyph_count == 0 {
             continue;
-        };
-        for (row_index, row_bits) in rows.iter().enumerate() {
-            for col in 0..5 {
-                let bit = 1 << (4 - col);
-                if row_bits & bit == 0 {
-                    continue;
-                }
-                push_overlay_rect(
-                    &mut vertices,
-                    [width, height],
-                    cursor_x + col as f32 * scale,
-                    y + row_index as f32 * scale,
-                    scale,
-                    scale,
-                    [0.82, 0.95, 1.0, 1.0],
-                );
-            }
         }
-        cursor_x += glyph_w + spacing;
+        let text_width =
+            glyph_count.saturating_sub(1) as f32 * spacing + glyph_count as f32 * glyph_w;
+        let x = (width - margin - text_width).max(margin);
+        let y = margin + line_index as f32 * (glyph_h + padding * 2.0 + 4.0);
+        push_overlay_rect(
+            &mut vertices,
+            [width, height],
+            x - padding,
+            y - padding,
+            text_width + padding * 2.0,
+            glyph_h + padding * 2.0,
+            [0.0, 0.0, 0.0, 0.48],
+        );
+        let mut cursor_x = x;
+        for ch in text.chars() {
+            let Some(rows) = glyph_rows(ch) else {
+                continue;
+            };
+            for (row_index, row_bits) in rows.iter().enumerate() {
+                for col in 0..5 {
+                    let bit = 1 << (4 - col);
+                    if row_bits & bit == 0 {
+                        continue;
+                    }
+                    push_overlay_rect(
+                        &mut vertices,
+                        [width, height],
+                        cursor_x + col as f32 * scale,
+                        y + row_index as f32 * scale,
+                        scale,
+                        scale,
+                        [0.82, 0.95, 1.0, 1.0],
+                    );
+                }
+            }
+            cursor_x += glyph_w + spacing;
+        }
     }
     vertices
 }
@@ -722,9 +754,28 @@ pub fn run_windowed<F>(
 where
     F: FnMut(&mut WorldState, WindowFrameContext) -> Result<bool, RenderError> + 'static,
 {
+    run_windowed_with_overlay(
+        world,
+        request,
+        config,
+        WindowOverlayLines::default(),
+        update,
+    )
+}
+
+pub fn run_windowed_with_overlay<F>(
+    world: WorldState,
+    request: RenderRequest,
+    config: WindowRenderConfig,
+    overlay_lines: WindowOverlayLines,
+    update: F,
+) -> Result<(), RenderError>
+where
+    F: FnMut(&mut WorldState, WindowFrameContext) -> Result<bool, RenderError> + 'static,
+{
     let event_loop = EventLoop::new()
         .map_err(|err| RenderError::new(format!("create window event loop: {err}")))?;
-    let mut app = WindowRendererApp::new(world, request, config, update);
+    let mut app = WindowRendererApp::new(world, request, config, overlay_lines, update);
     event_loop
         .run_app(&mut app)
         .map_err(|err| RenderError::new(format!("run window event loop: {err}")))?;
@@ -753,6 +804,7 @@ where
     start: std::time::Instant,
     last_frame_instant: Option<std::time::Instant>,
     smoothed_fps: f32,
+    overlay_lines: WindowOverlayLines,
     window_profile: Option<WindowProfile>,
     last_error: Option<RenderError>,
     input: WindowInputState,
@@ -767,6 +819,7 @@ where
         world: WorldState,
         request: RenderRequest,
         config: WindowRenderConfig,
+        overlay_lines: WindowOverlayLines,
         update: F,
     ) -> Self {
         Self {
@@ -785,6 +838,7 @@ where
             start: std::time::Instant::now(),
             last_frame_instant: None,
             smoothed_fps: 0.0,
+            overlay_lines,
             window_profile: WindowProfile::from_environment(),
             last_error: None,
             input: WindowInputState::default(),
@@ -998,12 +1052,14 @@ where
         let scene_elapsed = scene_start.elapsed();
         let fps_overlay_start = std::time::Instant::now();
         if let Some(fps_overlay) = self.fps_overlay.as_ref() {
+            let additional_lines = self.overlay_lines.snapshot();
             fps_overlay.render(
                 renderer.device(),
                 renderer.queue(),
                 &view,
                 [config.width, config.height],
                 self.smoothed_fps,
+                &additional_lines,
             );
         }
         let fps_overlay_elapsed = fps_overlay_start.elapsed();
