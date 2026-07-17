@@ -92,6 +92,16 @@ pub struct WindowRenderConfig {
     pub resolution: [u32; 2],
 }
 
+/// One native surface managed by [`run_windows_with_overlay`].  The first
+/// target is the primary window; closing it ends the event loop, while closing
+/// a later target only closes that window.
+pub struct WindowRenderTarget {
+    pub world: WorldState,
+    pub request: RenderRequest,
+    pub config: WindowRenderConfig,
+    pub overlay_lines: WindowOverlayLines,
+}
+
 impl Default for WindowRenderConfig {
     fn default() -> Self {
         Self {
@@ -783,6 +793,420 @@ where
         return Err(err);
     }
     Ok(())
+}
+
+/// Runs multiple PGE render targets in one Winit event loop and shares one WGPU
+/// device/renderer across their compatible surface formats.
+pub fn run_windows_with_overlay<F>(
+    targets: Vec<WindowRenderTarget>,
+    update: F,
+) -> Result<(), RenderError>
+where
+    F: FnMut(usize, &mut WorldState, WindowFrameContext) -> Result<bool, RenderError> + 'static,
+{
+    if targets.is_empty() {
+        return Err(RenderError::new(
+            "run_windows_with_overlay requires a primary window",
+        ));
+    }
+    let event_loop = EventLoop::new()
+        .map_err(|err| RenderError::new(format!("create window event loop: {err}")))?;
+    let mut app = MultiWindowRendererApp::new(targets, update);
+    event_loop
+        .run_app(&mut app)
+        .map_err(|err| RenderError::new(format!("run window event loop: {err}")))?;
+    if let Some(err) = app.last_error {
+        return Err(err);
+    }
+    Ok(())
+}
+
+struct MultiWindowSlot {
+    world: WorldState,
+    request: RenderRequest,
+    config: WindowRenderConfig,
+    overlay_lines: WindowOverlayLines,
+    window: Option<Arc<WinitWindow>>,
+    surface: Option<wgpu::Surface<'static>>,
+    surface_config: Option<wgpu::SurfaceConfiguration>,
+    depth_view: Option<wgpu::TextureView>,
+    frame_index: u64,
+    last_frame_instant: Option<std::time::Instant>,
+    smoothed_fps: f32,
+    input: WindowInputState,
+    last_cursor_position_px: Option<[f32; 2]>,
+    closed: bool,
+}
+
+impl From<WindowRenderTarget> for MultiWindowSlot {
+    fn from(target: WindowRenderTarget) -> Self {
+        Self {
+            world: target.world,
+            request: target.request,
+            config: target.config,
+            overlay_lines: target.overlay_lines,
+            window: None,
+            surface: None,
+            surface_config: None,
+            depth_view: None,
+            frame_index: 0,
+            last_frame_instant: None,
+            smoothed_fps: 0.0,
+            input: WindowInputState::default(),
+            last_cursor_position_px: None,
+            closed: false,
+        }
+    }
+}
+
+struct MultiWindowRendererApp<F>
+where
+    F: FnMut(usize, &mut WorldState, WindowFrameContext) -> Result<bool, RenderError>,
+{
+    windows: Vec<MultiWindowSlot>,
+    update: F,
+    started_at: std::time::Instant,
+    renderer: Option<WgpuRenderer>,
+    fps_overlay: Option<FpsOverlayRenderer>,
+    text_overlay: Option<TextOverlayRenderer>,
+    last_error: Option<RenderError>,
+}
+
+impl<F> MultiWindowRendererApp<F>
+where
+    F: FnMut(usize, &mut WorldState, WindowFrameContext) -> Result<bool, RenderError>,
+{
+    fn new(targets: Vec<WindowRenderTarget>, update: F) -> Self {
+        Self {
+            windows: targets.into_iter().map(Into::into).collect(),
+            update,
+            started_at: std::time::Instant::now(),
+            renderer: None,
+            fps_overlay: None,
+            text_overlay: None,
+            last_error: None,
+        }
+    }
+
+    fn initialize(&mut self, event_loop: &ActiveEventLoop) -> Result<(), RenderError> {
+        if self.renderer.is_some() {
+            return Ok(());
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        for slot in &mut self.windows {
+            let [width, height] = slot.config.resolution;
+            let attributes = WindowAttributes::default()
+                .with_title(slot.config.title.clone())
+                .with_inner_size(PhysicalSize::new(width.max(1), height.max(1)));
+            let window = Arc::new(
+                event_loop
+                    .create_window(attributes)
+                    .map_err(|err| RenderError::new(format!("create window: {err}")))?,
+            );
+            slot.surface = Some(
+                instance
+                    .create_surface(Arc::clone(&window))
+                    .map_err(|err| RenderError::new(format!("create WGPU surface: {err}")))?,
+            );
+            slot.window = Some(window);
+        }
+        let first_surface = self.windows[0]
+            .surface
+            .as_ref()
+            .expect("primary surface initialized");
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(first_surface),
+            force_fallback_adapter: false,
+        }))
+        .ok_or_else(|| RenderError::new("no WGPU adapter available for window surfaces"))?;
+        let common_format = common_surface_format(&adapter, &self.windows)
+            .ok_or_else(|| RenderError::new("window surfaces have no common WGPU format"))?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&default_device_descriptor(), None))
+                .map_err(|err| RenderError::new(format!("create WGPU device: {err}")))?;
+        let renderer = WgpuRenderer::from_device(device, queue, common_format);
+        for slot in &mut self.windows {
+            let window = slot.window.as_ref().expect("window initialized");
+            let surface = slot.surface.as_ref().expect("surface initialized");
+            let caps = surface.get_capabilities(&adapter);
+            let size = window.inner_size();
+            let config = wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: common_format,
+                width: size.width.max(1),
+                height: size.height.max(1),
+                present_mode: caps
+                    .present_modes
+                    .iter()
+                    .copied()
+                    .find(|mode| *mode == wgpu::PresentMode::Fifo)
+                    .unwrap_or(caps.present_modes[0]),
+                alpha_mode: caps.alpha_modes[0],
+                view_formats: vec![],
+                desired_maximum_frame_latency: 1,
+            };
+            surface.configure(renderer.device(), &config);
+            slot.request.resolution = [config.width, config.height];
+            slot.depth_view = Some(create_depth_view(
+                renderer.device(),
+                slot.request.resolution,
+            ));
+            slot.surface_config = Some(config);
+        }
+        self.fps_overlay = Some(FpsOverlayRenderer::new(renderer.device(), common_format));
+        self.text_overlay = Some(TextOverlayRenderer::new(renderer.device(), common_format));
+        self.renderer = Some(renderer);
+        Ok(())
+    }
+
+    fn window_index(&self, id: winit::window::WindowId) -> Option<usize> {
+        self.windows
+            .iter()
+            .position(|slot| slot.window.as_ref().is_some_and(|window| window.id() == id))
+    }
+
+    fn resize(&mut self, index: usize, size: PhysicalSize<u32>) {
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        let slot = &mut self.windows[index];
+        let (Some(surface), Some(config)) = (slot.surface.as_ref(), slot.surface_config.as_mut())
+        else {
+            return;
+        };
+        config.width = size.width;
+        config.height = size.height;
+        surface.configure(renderer.device(), config);
+        slot.request.resolution = [config.width, config.height];
+        slot.depth_view = Some(create_depth_view(
+            renderer.device(),
+            slot.request.resolution,
+        ));
+    }
+
+    fn redraw(&mut self, index: usize, event_loop: &ActiveEventLoop) {
+        if self.windows[index].closed {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let slot = &mut self.windows[index];
+        if let Some(previous) = slot.last_frame_instant.replace(now) {
+            let elapsed = now.duration_since(previous).as_secs_f32();
+            if elapsed > 0.0 {
+                let fps = 1.0 / elapsed;
+                slot.smoothed_fps = if slot.smoothed_fps > 0.0 {
+                    slot.smoothed_fps * 0.9 + fps * 0.1
+                } else {
+                    fps
+                };
+            }
+        }
+        let context = WindowFrameContext {
+            frame_index: slot.frame_index,
+            elapsed_sec: self.started_at.elapsed().as_secs_f64(),
+            input: slot.input,
+        };
+        match (self.update)(index, &mut slot.world, context) {
+            Ok(true) => {}
+            Ok(false) => {
+                event_loop.exit();
+                return;
+            }
+            Err(err) => {
+                self.last_error = Some(err);
+                event_loop.exit();
+                return;
+            }
+        }
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        let (Some(surface), Some(config), Some(depth_view)) = (
+            slot.surface.as_ref(),
+            slot.surface_config.as_ref(),
+            slot.depth_view.as_ref(),
+        ) else {
+            return;
+        };
+        let output = match surface.get_current_texture() {
+            Ok(output) => output,
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                surface.configure(renderer.device(), config);
+                return;
+            }
+            Err(wgpu::SurfaceError::Timeout) => return,
+            Err(err) => {
+                self.last_error = Some(RenderError::new(format!("acquire surface texture: {err}")));
+                event_loop.exit();
+                return;
+            }
+        };
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        if let Err(err) = renderer.render_to_view(&slot.world, &slot.request, &view, depth_view) {
+            self.last_error = Some(err);
+            event_loop.exit();
+            return;
+        }
+        if let Some(overlay) = self.fps_overlay.as_ref() {
+            overlay.render(
+                renderer.device(),
+                renderer.queue(),
+                &view,
+                [config.width, config.height],
+                slot.smoothed_fps,
+                &slot.overlay_lines.snapshot(),
+            );
+        }
+        if let Some(overlay) = self.text_overlay.as_mut() {
+            overlay.render(
+                renderer.device(),
+                renderer.queue(),
+                &view,
+                [config.width, config.height],
+                &slot.world.text_labels,
+            );
+        }
+        slot.input.left_drag_delta_px = [0.0, 0.0];
+        slot.input.middle_drag_delta_px = [0.0, 0.0];
+        slot.input.right_drag_delta_px = [0.0, 0.0];
+        slot.input.scroll_delta_lines = 0.0;
+        output.present();
+        slot.frame_index += 1;
+    }
+
+    fn update_cursor_position(&mut self, index: usize, x: f64, y: f64) {
+        let slot = &mut self.windows[index];
+        let position = [x as f32, y as f32];
+        if let Some(previous) = slot.last_cursor_position_px {
+            let delta = [position[0] - previous[0], position[1] - previous[1]];
+            if slot.input.left_drag_active {
+                slot.input.left_drag_delta_px[0] += delta[0];
+                slot.input.left_drag_delta_px[1] += delta[1];
+            }
+            if slot.input.middle_drag_active {
+                slot.input.middle_drag_delta_px[0] += delta[0];
+                slot.input.middle_drag_delta_px[1] += delta[1];
+            }
+            if slot.input.right_drag_active {
+                slot.input.right_drag_delta_px[0] += delta[0];
+                slot.input.right_drag_delta_px[1] += delta[1];
+            }
+        }
+        slot.input.cursor_position_px = Some(position);
+        slot.last_cursor_position_px = Some(position);
+    }
+
+    fn update_mouse_button(&mut self, index: usize, button: WinitMouseButton, state: ElementState) {
+        let slot = &mut self.windows[index];
+        let active = state == ElementState::Pressed;
+        match button {
+            WinitMouseButton::Left => slot.input.left_drag_active = active,
+            WinitMouseButton::Middle => slot.input.middle_drag_active = active,
+            WinitMouseButton::Right => slot.input.right_drag_active = active,
+            _ => return,
+        }
+    }
+
+    fn update_mouse_wheel(&mut self, index: usize, delta: MouseScrollDelta) {
+        self.windows[index].input.scroll_delta_lines += match delta {
+            MouseScrollDelta::LineDelta(_, dy) => dy,
+            MouseScrollDelta::PixelDelta(position) => position.y as f32 / 100.0,
+        };
+    }
+}
+
+impl<F> ApplicationHandler for MultiWindowRendererApp<F>
+where
+    F: FnMut(usize, &mut WorldState, WindowFrameContext) -> Result<bool, RenderError>,
+{
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        event_loop.set_control_flow(ControlFlow::Poll);
+        if let Err(err) = self.initialize(event_loop) {
+            self.last_error = Some(err);
+            event_loop.exit();
+            return;
+        }
+        for slot in &self.windows {
+            if let Some(window) = &slot.window {
+                window.request_redraw();
+            }
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
+        let Some(index) = self.window_index(window_id) else {
+            return;
+        };
+        match event {
+            WindowEvent::CloseRequested if index == 0 => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                let slot = &mut self.windows[index];
+                slot.closed = true;
+                slot.window = None;
+                slot.surface = None;
+                slot.surface_config = None;
+                slot.depth_view = None;
+            }
+            WindowEvent::Resized(size) => self.resize(index, size),
+            WindowEvent::RedrawRequested => self.redraw(index, event_loop),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.update_cursor_position(index, position.x, position.y)
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.update_mouse_button(index, button, state)
+            }
+            WindowEvent::MouseWheel { delta, .. } => self.update_mouse_wheel(index, delta),
+            WindowEvent::CursorLeft { .. } | WindowEvent::Focused(false) => {
+                let slot = &mut self.windows[index];
+                slot.input.left_drag_active = false;
+                slot.input.middle_drag_active = false;
+                slot.input.right_drag_active = false;
+                slot.last_cursor_position_px = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        for slot in &self.windows {
+            if !slot.closed {
+                if let Some(window) = &slot.window {
+                    window.request_redraw();
+                }
+            }
+        }
+    }
+}
+
+fn common_surface_format(
+    adapter: &wgpu::Adapter,
+    windows: &[MultiWindowSlot],
+) -> Option<wgpu::TextureFormat> {
+    let first = windows.first()?.surface.as_ref()?.get_capabilities(adapter);
+    [
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        wgpu::TextureFormat::Bgra8UnormSrgb,
+    ]
+    .into_iter()
+    .chain(first.formats.iter().copied())
+    .find(|format| {
+        windows.iter().all(|slot| {
+            slot.surface
+                .as_ref()
+                .is_some_and(|surface| surface.get_capabilities(adapter).formats.contains(format))
+        })
+    })
 }
 
 struct WindowRendererApp<F>
