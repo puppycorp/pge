@@ -1,7 +1,7 @@
 use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, ChildStdin, Command, Stdio};
 
 use pge_core::WorldState;
 use pge_renderer::{OffscreenRenderer, RenderError, RenderRequest};
@@ -117,6 +117,9 @@ pub enum VideoError {
         path: PathBuf,
         source: std::io::Error,
     },
+    StreamWrite {
+        source: std::io::Error,
+    },
     Render {
         source: RenderError,
     },
@@ -138,6 +141,7 @@ impl fmt::Display for VideoError {
             Self::WriteFrame { path, source } => {
                 write!(f, "write video frame {}: {source}", path.display())
             }
+            Self::StreamWrite { source } => write!(f, "write streaming video frame: {source}"),
             Self::Render { source } => write!(f, "render video frame: {source}"),
             Self::Launch { source } => write!(f, "launch gst-launch-1.0: {source}"),
             Self::EncoderFailed { status } => write!(f, "gst-launch-1.0 failed with {status}"),
@@ -150,10 +154,130 @@ impl std::error::Error for VideoError {
         match self {
             Self::CreateOutputDirectory { source, .. } => Some(source),
             Self::WriteFrame { source, .. } => Some(source),
+            Self::StreamWrite { source } => Some(source),
             Self::Render { source } => Some(source),
             Self::Launch { source } => Some(source),
             Self::EmptySequence | Self::EncoderFailed { .. } => None,
         }
+    }
+}
+
+/// H.264 MP4 encoder that accepts raw RGBA frames through a persistent stdin.
+///
+/// The encoder writes to a sibling temporary file and publishes the final MP4
+/// only after `finish` closes stdin and GStreamer has finalized the container.
+pub struct StreamingRgbaMp4Encoder {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    output: PathBuf,
+    temporary_output: PathBuf,
+    frame_bytes: usize,
+    frame_count: u64,
+}
+
+impl StreamingRgbaMp4Encoder {
+    pub fn start(
+        output: impl Into<PathBuf>,
+        width: u32,
+        height: u32,
+        fps: u32,
+        bitrate: u32,
+    ) -> Result<Self, VideoError> {
+        let output = output.into();
+        if let Some(parent) = output.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(|source| VideoError::CreateOutputDirectory {
+                    path: parent.to_path_buf(),
+                    source,
+                })?;
+            }
+        }
+        let temporary_output = output.with_extension("mp4.partial");
+        let fps = fps.max(1);
+        let frame_bytes = width as usize * height as usize * 4;
+        let mut child = Command::new("gst-launch-1.0")
+            .arg("-q")
+            .arg("fdsrc")
+            .arg("fd=0")
+            .arg("!")
+            .arg("rawvideoparse")
+            .arg("format=rgba")
+            .arg(format!("width={width}"))
+            .arg(format!("height={height}"))
+            .arg(format!("framerate={fps}/1"))
+            .arg("!")
+            .arg("videoconvert")
+            .arg("!")
+            .arg(format!("video/x-raw,format=I420,framerate={fps}/1"))
+            .arg("!")
+            .arg("openh264enc")
+            .arg(format!("bitrate={bitrate}"))
+            .arg(format!("gop-size={fps}"))
+            .arg("!")
+            .arg("h264parse")
+            .arg("config-interval=-1")
+            .arg("!")
+            .arg("video/x-h264,stream-format=avc,alignment=au")
+            .arg("!")
+            .arg("mp4mux")
+            .arg("faststart=true")
+            .arg("!")
+            .arg("filesink")
+            .arg(format!("location={}", temporary_output.display()))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|source| VideoError::Launch { source })?;
+        let stdin = child.stdin.take().ok_or_else(|| VideoError::Launch {
+            source: std::io::Error::other("gst-launch-1.0 stdin was not piped"),
+        })?;
+        Ok(Self {
+            child,
+            stdin: Some(stdin),
+            output,
+            temporary_output,
+            frame_bytes,
+            frame_count: 0,
+        })
+    }
+
+    pub fn push_rgba_frame(&mut self, bytes: &[u8]) -> Result<(), VideoError> {
+        if bytes.len() != self.frame_bytes {
+            return Err(VideoError::StreamWrite {
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("expected {} RGBA bytes, got {}", self.frame_bytes, bytes.len()),
+                ),
+            });
+        }
+        self.stdin
+            .as_mut()
+            .ok_or_else(|| VideoError::StreamWrite {
+                source: std::io::Error::new(std::io::ErrorKind::BrokenPipe, "encoder is finalized"),
+            })?
+            .write_all(bytes)
+            .map_err(|source| VideoError::StreamWrite { source })?;
+        self.frame_count = self.frame_count.saturating_add(1);
+        Ok(())
+    }
+
+    pub fn finish(mut self) -> Result<VideoRecordOutput, VideoError> {
+        drop(self.stdin.take());
+        let status = self.child.wait().map_err(|source| VideoError::Launch { source })?;
+        if !status.success() {
+            return Err(VideoError::EncoderFailed { status });
+        }
+        std::fs::rename(&self.temporary_output, &self.output).map_err(|source| {
+            VideoError::WriteFrame {
+                path: self.output.clone(),
+                source,
+            }
+        })?;
+        Ok(VideoRecordOutput {
+            output: self.output,
+            frame_count: self.frame_count.min(u64::from(u32::MAX)) as u32,
+        })
     }
 }
 
