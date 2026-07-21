@@ -99,6 +99,82 @@ pub enum Collider {
     MeshBounds { size: [f32; 3] },
 }
 
+/// A primitive that can be drawn by a collider-debug renderer.
+///
+/// This is deliberately separate from [`Collider`]. It describes diagnostic
+/// geometry only and is never consumed by PGE physics.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ColliderWireframeShape {
+    Box {
+        size: [f32; 3],
+    },
+    Sphere {
+        radius: f32,
+    },
+    Cylinder {
+        radius: f32,
+        height: f32,
+    },
+    MeshBounds {
+        size: [f32; 3],
+    },
+    Compound {
+        children: Vec<ColliderWireframeChild>,
+    },
+}
+
+/// One link-local member of a compound debug collider.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColliderWireframeChild {
+    pub transform: Transform,
+    pub shape: ColliderWireframeShape,
+}
+
+/// A render-only collider diagnostic in world coordinates.
+///
+/// `id` is intended to be stable across frames, while `category` lets a
+/// product distinguish scene, vehicle, link, or backend-only colliders. The
+/// colour is linear RGBA and belongs to the diagnostic, not its source body.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColliderWireframe {
+    pub id: String,
+    pub category: String,
+    pub color: [f32; 4],
+    pub transform: Transform,
+    pub shape: ColliderWireframeShape,
+}
+
+impl ColliderWireframe {
+    pub fn new(
+        id: impl Into<String>,
+        category: impl Into<String>,
+        transform: Transform,
+        shape: ColliderWireframeShape,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            category: category.into(),
+            color: [1.0, 0.0, 1.0, 1.0],
+            transform,
+            shape,
+        }
+    }
+}
+
+/// Format-neutral, render-only collider diagnostics.
+///
+/// A consumer may add colliders that live in a backend outside PGE's native
+/// `Node::collider` field (for example reviewed robot-link profiles). These
+/// entries remain intentionally outside `nodes`, `meshes`, and `PhysicsBody`,
+/// so enabling the overlay cannot affect stepping or camera fitting.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ColliderDebugOverlay {
+    pub enabled: bool,
+    pub wireframes: Vec<ColliderWireframe>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum NodeParent {
     Node(ArenaId<Node>),
@@ -345,6 +421,8 @@ pub struct WorldState {
     pub joints: Arena<Joint>,
     pub entities: Vec<EntityMetadata>,
     pub text_labels: Vec<TextLabel>,
+    #[serde(default)]
+    pub collider_debug: ColliderDebugOverlay,
 }
 
 impl WorldState {
@@ -367,6 +445,123 @@ impl WorldState {
             self.entities.push(metadata);
         }
     }
+
+    /// Returns the complete renderer-facing collider overlay for this world.
+    ///
+    /// Native PGE scene colliders are derived every call so their current node
+    /// poses remain accurate. `collider_debug.wireframes` supplies additional
+    /// colliders owned by importers or an external physics backend. No entry
+    /// returned here is a world node or a physics shape.
+    pub fn collider_wireframes(&self) -> Vec<ColliderWireframe> {
+        if !self.collider_debug.enabled {
+            return Vec::new();
+        }
+
+        let mut wireframes = self.collider_debug.wireframes.clone();
+        for (node_id, node) in self.nodes.iter() {
+            let Some(collider) = &node.collider else {
+                continue;
+            };
+            wireframes.push(ColliderWireframe {
+                id: format!("pge.scene-collider:{}", node.entity.0),
+                category: "sceneCollider".to_string(),
+                color: [1.0, 0.0, 1.0, 1.0],
+                transform: self.node_world_transform(node_id),
+                shape: collider_wireframe_shape(collider),
+            });
+        }
+        wireframes.sort_by(|left, right| left.id.cmp(&right.id));
+        wireframes
+    }
+
+    /// Adds a non-physical collider diagnostic. Callers should update the
+    /// transform every simulation frame for backend-owned dynamic colliders.
+    pub fn push_collider_wireframe(&mut self, wireframe: ColliderWireframe) {
+        self.collider_debug.wireframes.push(wireframe);
+    }
+
+    fn node_world_transform(&self, node_id: ArenaId<Node>) -> Transform {
+        let Some(node) = self.nodes.get(&node_id) else {
+            return Transform::default();
+        };
+        match node.parent {
+            NodeParent::Node(parent) => {
+                compose_transforms(self.node_world_transform(parent), node.transform)
+            }
+            NodeParent::Scene(_) | NodeParent::Orphan => node.transform,
+        }
+    }
+}
+
+fn collider_wireframe_shape(collider: &Collider) -> ColliderWireframeShape {
+    match collider {
+        Collider::Box { size } => ColliderWireframeShape::Box { size: *size },
+        Collider::Sphere { radius } => ColliderWireframeShape::Sphere { radius: *radius },
+        Collider::Cylinder { radius, height } => ColliderWireframeShape::Cylinder {
+            radius: *radius,
+            height: *height,
+        },
+        Collider::MeshBounds { size } => ColliderWireframeShape::MeshBounds { size: *size },
+    }
+}
+
+fn compose_transforms(parent: Transform, child: Transform) -> Transform {
+    let parent_rotation = transform_rotation_matrix(parent);
+    let child_rotation = transform_rotation_matrix(child);
+    let rotated_translation = multiply_matrix_vector(parent_rotation, child.translation);
+    Transform::matrix(
+        [
+            parent.translation[0] + rotated_translation[0],
+            parent.translation[1] + rotated_translation[1],
+            parent.translation[2] + rotated_translation[2],
+        ],
+        multiply_matrices(parent_rotation, child_rotation),
+    )
+}
+
+fn transform_rotation_matrix(transform: Transform) -> [[f32; 3]; 3] {
+    transform
+        .rotation_matrix
+        .unwrap_or_else(|| rpy_to_matrix(transform.rotation))
+}
+
+fn rpy_to_matrix([roll, pitch, yaw]: [f32; 3]) -> [[f32; 3]; 3] {
+    let (sin_roll, cos_roll) = roll.sin_cos();
+    let (sin_pitch, cos_pitch) = pitch.sin_cos();
+    let (sin_yaw, cos_yaw) = yaw.sin_cos();
+    [
+        [
+            cos_yaw * cos_pitch,
+            cos_yaw * sin_pitch * sin_roll - sin_yaw * cos_roll,
+            cos_yaw * sin_pitch * cos_roll + sin_yaw * sin_roll,
+        ],
+        [
+            sin_yaw * cos_pitch,
+            sin_yaw * sin_pitch * sin_roll + cos_yaw * cos_roll,
+            sin_yaw * sin_pitch * cos_roll - cos_yaw * sin_roll,
+        ],
+        [-sin_pitch, cos_pitch * sin_roll, cos_pitch * cos_roll],
+    ]
+}
+
+fn multiply_matrices(left: [[f32; 3]; 3], right: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    let mut result = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for column in 0..3 {
+            result[row][column] = (0..3)
+                .map(|index| left[row][index] * right[index][column])
+                .sum();
+        }
+    }
+    result
+}
+
+fn multiply_matrix_vector(matrix: [[f32; 3]; 3], vector: [f32; 3]) -> [f32; 3] {
+    [
+        matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
+        matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
+        matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
+    ]
 }
 
 fn matrix_to_rpy(matrix: [[f32; 3]; 3]) -> [f32; 3] {
@@ -380,5 +575,87 @@ fn matrix_to_rpy(matrix: [[f32; 3]; 3]) -> [f32; 3] {
         ]
     } else {
         [0.0, pitch, (-matrix[0][1]).atan2(matrix[1][1])]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collider_wireframes_are_disabled_until_explicitly_enabled() {
+        let mut world = WorldState::new();
+        let mut node = Node::new("floor");
+        node.collider = Some(Collider::Box {
+            size: [2.0, 3.0, 0.1],
+        });
+        world.nodes.insert(node);
+
+        assert!(world.collider_wireframes().is_empty());
+    }
+
+    #[test]
+    fn collider_wireframes_merge_native_and_backend_entries_in_stable_order() {
+        let mut world = WorldState::new();
+        world.collider_debug.enabled = true;
+        world.push_collider_wireframe(ColliderWireframe::new(
+            "robot-link:shoulder",
+            "robotLink",
+            Transform::translated([0.0, 0.0, 1.0]),
+            ColliderWireframeShape::Compound {
+                children: vec![ColliderWireframeChild {
+                    transform: Transform::translated([0.0, 0.1, 0.0]),
+                    shape: ColliderWireframeShape::Cylinder {
+                        radius: 0.02,
+                        height: 0.15,
+                    },
+                }],
+            },
+        ));
+        let mut node = Node::new("floor");
+        node.collider = Some(Collider::Box {
+            size: [2.0, 3.0, 0.1],
+        });
+        world.nodes.insert(node);
+
+        let wireframes = world.collider_wireframes();
+
+        assert_eq!(wireframes.len(), 2);
+        assert_eq!(wireframes[0].id, "pge.scene-collider:floor");
+        assert_eq!(wireframes[0].category, "sceneCollider");
+        assert_eq!(wireframes[1].id, "robot-link:shoulder");
+        assert_eq!(wireframes[1].category, "robotLink");
+        assert!(matches!(
+            wireframes[1].shape,
+            ColliderWireframeShape::Compound { .. }
+        ));
+    }
+
+    #[test]
+    fn native_collider_uses_composed_parent_pose_without_creating_a_node() {
+        let mut world = WorldState::new();
+        world.collider_debug.enabled = true;
+        let mut parent = Node::new("parent");
+        parent.transform = Transform {
+            translation: [1.0, 0.0, 0.0],
+            rotation: [0.0, 0.0, std::f32::consts::FRAC_PI_2],
+            rotation_matrix: None,
+        };
+        let parent_id = world.nodes.insert(parent);
+        let mut child = Node::new("child");
+        child.parent = NodeParent::Node(parent_id);
+        child.transform = Transform::translated([1.0, 0.0, 0.0]);
+        child.collider = Some(Collider::Sphere { radius: 0.05 });
+        world.nodes.insert(child);
+
+        let wireframes = world.collider_wireframes();
+        let child = wireframes
+            .iter()
+            .find(|wireframe| wireframe.id == "pge.scene-collider:child")
+            .expect("child collider wireframe");
+
+        assert!((child.transform.translation[0] - 1.0).abs() < 1.0e-5);
+        assert!((child.transform.translation[1] - 1.0).abs() < 1.0e-5);
+        assert_eq!(world.nodes.len(), 2);
     }
 }

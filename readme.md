@@ -31,3 +31,33 @@ If no GPU adapter is available, SCREENSHOT/HEADLESS rendering will fall back to 
 ### SCREENSHOT_INTERVAL (number)
 
 When SCREENSHOT is 1, save a frame every N renders (default 1).
+
+## Collider wireframe overlay
+
+PGE owns a format-neutral, render-only collider overlay in `pge_core`. Enable
+it on a `WorldState` and the WGPU renderer draws every native `Node::collider`
+plus any backend-owned collider diagnostics supplied by the caller:
+
+```rust
+use pge_core::{
+    ColliderWireframe, ColliderWireframeShape, Transform,
+};
+
+world.collider_debug.enabled = true;
+world.push_collider_wireframe(ColliderWireframe::new(
+    "robot-link:shoulder",
+    "robotLink",
+    Transform::translated([0.0, 0.0, 0.25]),
+    ColliderWireframeShape::Cylinder {
+        radius: 0.03,
+        height: 0.18,
+    },
+));
+```
+
+`ColliderWireframe` carries a stable ID, category, RGBA colour, world pose,
+and a box, sphere, cylinder, mesh-bounds, or recursively compound shape. The
+renderer obtains the complete list with `WorldState::collider_wireframes()`.
+Products can update the supplied entries with their current backend poses each
+frame. The overlay is not a `Node`, `Mesh`, or `PhysicsBody`; it is excluded
+from physics stepping and camera-fitting by construction.

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "pge-core",
+    "pge-collision",
     "pge-physics",
     "pge-renderer",
     "pge-wgpu-renderer",

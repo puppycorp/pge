@@ -1,0 +1,10 @@
+[package]
+name = "pge-collision"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic collision-shape candidate generation for local triangle meshes"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+gltf = "1"

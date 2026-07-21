@@ -6,8 +6,8 @@ use std::time::Duration;
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
 use pge_core::{
-    ArenaId, Camera, CameraProjection, Geometry, Mesh, MeshSource, Node, NodeParent, Transform,
-    WorldState,
+    ArenaId, Camera, CameraProjection, ColliderWireframeShape, Geometry, Mesh, MeshSource, Node,
+    NodeParent, Transform, WorldState,
 };
 use pge_renderer::{
     FrameBuffer, FrameKind, OffscreenRenderer, ProfiledRenderer, RenderError, RenderMetadata,
@@ -85,6 +85,12 @@ struct DrawItem {
     dynamic_offset: u32,
 }
 
+struct WireframeDrawItem {
+    first_vertex: u32,
+    vertex_count: u32,
+    dynamic_offset: u32,
+}
+
 struct RenderTarget {
     color_texture: wgpu::Texture,
     color_view: wgpu::TextureView,
@@ -128,12 +134,15 @@ pub struct WgpuRenderer {
     pub(crate) device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
+    wireframe_pipeline: wgpu::RenderPipeline,
     object_bind_group_layout: wgpu::BindGroupLayout,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     object_buffer: wgpu::Buffer,
     object_buffer_capacity: usize,
     object_bind_group: wgpu::BindGroup,
+    wireframe_vertex_buffer: wgpu::Buffer,
+    wireframe_vertex_capacity: usize,
     // Static world meshes share source-keyed GPU data. The mesh-to-key map
     // lets an animated procedural mesh release its old source entry when its
     // dimensions change, avoiding cache growth across poses.
@@ -256,6 +265,41 @@ impl WgpuRenderer {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
+        let wireframe_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("pge wgpu collider wireframe pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("pge camera uniform"),
             size: std::mem::size_of::<CameraUniform>() as u64,
@@ -289,17 +333,27 @@ impl WgpuRenderer {
                 }),
             }],
         });
+        let wireframe_vertex_capacity = std::mem::size_of::<Vertex>();
+        let wireframe_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pge collider wireframe vertices"),
+            size: wireframe_vertex_capacity as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         Self {
             device,
             queue,
             pipeline,
+            wireframe_pipeline,
             object_bind_group_layout,
             camera_buffer,
             camera_bind_group,
             object_buffer,
             object_buffer_capacity,
             object_bind_group,
+            wireframe_vertex_buffer,
+            wireframe_vertex_capacity,
             mesh_cache: HashMap::new(),
             gpu_cache: HashMap::new(),
             mesh_cache_keys: HashMap::new(),
@@ -367,6 +421,7 @@ impl WgpuRenderer {
                 }
             }
         }
+        let wireframe_draw_items = self.prepare_wireframe_draws(world, &mut object_uniform_bytes);
         if object_uniform_bytes.is_empty() {
             object_uniform_bytes.resize(object_uniform_stride, 0);
         }
@@ -419,6 +474,18 @@ impl WgpuRenderer {
                         );
                         pass.draw_indexed(0..mesh.index_count, 0, 0..1);
                     }
+                }
+            }
+            if !wireframe_draw_items.is_empty() {
+                pass.set_pipeline(&self.wireframe_pipeline);
+                pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.wireframe_vertex_buffer.slice(..));
+                for item in &wireframe_draw_items {
+                    pass.set_bind_group(1, &self.object_bind_group, &[item.dynamic_offset]);
+                    pass.draw(
+                        item.first_vertex..item.first_vertex + item.vertex_count,
+                        0..1,
+                    );
                 }
             }
         }
@@ -475,6 +542,7 @@ impl WgpuRenderer {
                 }
             }
         }
+        let wireframe_draw_items = self.prepare_wireframe_draws(world, &mut object_uniform_bytes);
         if object_uniform_bytes.is_empty() {
             object_uniform_bytes.resize(object_uniform_stride, 0);
         }
@@ -532,6 +600,18 @@ impl WgpuRenderer {
                         );
                         pass.draw_indexed(0..mesh.index_count, 0, 0..1);
                     }
+                }
+            }
+            if !wireframe_draw_items.is_empty() {
+                pass.set_pipeline(&self.wireframe_pipeline);
+                pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.wireframe_vertex_buffer.slice(..));
+                for item in &wireframe_draw_items {
+                    pass.set_bind_group(1, &self.object_bind_group, &[item.dynamic_offset]);
+                    pass.draw(
+                        item.first_vertex..item.first_vertex + item.vertex_count,
+                        0..1,
+                    );
                 }
             }
         }
@@ -611,6 +691,7 @@ impl WgpuRenderer {
                 }
             }
         }
+        let wireframe_draw_items = self.prepare_wireframe_draws(world, &mut object_uniform_bytes);
         if object_uniform_bytes.is_empty() {
             object_uniform_bytes.resize(object_uniform_stride, 0);
         }
@@ -670,6 +751,18 @@ impl WgpuRenderer {
                         );
                         pass.draw_indexed(0..mesh.index_count, 0, 0..1);
                     }
+                }
+            }
+            if !wireframe_draw_items.is_empty() {
+                pass.set_pipeline(&self.wireframe_pipeline);
+                pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.wireframe_vertex_buffer.slice(..));
+                for item in &wireframe_draw_items {
+                    pass.set_bind_group(1, &self.object_bind_group, &[item.dynamic_offset]);
+                    pass.draw(
+                        item.first_vertex..item.first_vertex + item.vertex_count,
+                        0..1,
+                    );
                 }
             }
         }
@@ -791,6 +884,71 @@ impl WgpuRenderer {
         self.object_buffer = object_buffer;
         self.object_bind_group = object_bind_group;
         self.object_buffer_capacity = capacity;
+    }
+
+    fn prepare_wireframe_draws(
+        &mut self,
+        world: &WorldState,
+        object_uniform_bytes: &mut Vec<u8>,
+    ) -> Vec<WireframeDrawItem> {
+        let object_uniform_stride = 256_usize;
+        let mut vertices = Vec::new();
+        let mut draws = Vec::new();
+        for wireframe in world.collider_wireframes() {
+            let first_vertex = vertices.len() as u32;
+            append_wireframe_shape(
+                &wireframe.shape,
+                transform_matrix(wireframe.transform),
+                &mut vertices,
+            );
+            let vertex_count = vertices.len() as u32 - first_vertex;
+            if vertex_count == 0 {
+                continue;
+            }
+            let dynamic_offset = object_uniform_bytes.len() as u32;
+            object_uniform_bytes.resize(object_uniform_bytes.len() + object_uniform_stride, 0);
+            let uniform = ObjectUniform {
+                model: Mat4::IDENTITY.to_cols_array_2d(),
+                color: wireframe.color,
+            };
+            object_uniform_bytes[dynamic_offset as usize
+                ..dynamic_offset as usize + std::mem::size_of::<ObjectUniform>()]
+                .copy_from_slice(bytemuck::bytes_of(&uniform));
+            draws.push(WireframeDrawItem {
+                first_vertex,
+                vertex_count,
+                dynamic_offset,
+            });
+        }
+        self.ensure_wireframe_vertex_buffer(vertices.len());
+        if !vertices.is_empty() {
+            self.queue.write_buffer(
+                &self.wireframe_vertex_buffer,
+                0,
+                bytemuck::cast_slice(&vertices),
+            );
+        }
+        draws
+    }
+
+    fn ensure_wireframe_vertex_buffer(&mut self, required_vertices: usize) {
+        let required_capacity = required_vertices.max(1) * std::mem::size_of::<Vertex>();
+        if required_capacity <= self.wireframe_vertex_capacity {
+            return;
+        }
+        let mut capacity = self
+            .wireframe_vertex_capacity
+            .max(std::mem::size_of::<Vertex>());
+        while capacity < required_capacity {
+            capacity *= 2;
+        }
+        self.wireframe_vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pge collider wireframe vertices"),
+            size: capacity as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.wireframe_vertex_capacity = capacity;
     }
 
     fn ensure_render_target(&mut self, resolution: [u32; 2]) {
@@ -1278,6 +1436,139 @@ fn cylinder_mesh(radius: f32, height: f32, color: [f32; 4]) -> MeshData {
     }
 }
 
+fn append_wireframe_shape(
+    shape: &ColliderWireframeShape,
+    transform: Mat4,
+    vertices: &mut Vec<Vertex>,
+) {
+    match shape {
+        ColliderWireframeShape::Box { size } | ColliderWireframeShape::MeshBounds { size } => {
+            append_wireframe_box(*size, transform, vertices)
+        }
+        ColliderWireframeShape::Sphere { radius } => {
+            append_wireframe_sphere(*radius, transform, vertices)
+        }
+        ColliderWireframeShape::Cylinder { radius, height } => {
+            append_wireframe_cylinder(*radius, *height, transform, vertices)
+        }
+        ColliderWireframeShape::Compound { children } => {
+            for child in children {
+                append_wireframe_shape(
+                    &child.shape,
+                    transform * transform_matrix(child.transform),
+                    vertices,
+                );
+            }
+        }
+    }
+}
+
+fn append_wireframe_box(size: [f32; 3], transform: Mat4, vertices: &mut Vec<Vertex>) {
+    let half = Vec3::from_array(size) * 0.5;
+    let corners = [
+        Vec3::new(-half.x, -half.y, -half.z),
+        Vec3::new(half.x, -half.y, -half.z),
+        Vec3::new(half.x, half.y, -half.z),
+        Vec3::new(-half.x, half.y, -half.z),
+        Vec3::new(-half.x, -half.y, half.z),
+        Vec3::new(half.x, -half.y, half.z),
+        Vec3::new(half.x, half.y, half.z),
+        Vec3::new(-half.x, half.y, half.z),
+    ];
+    const EDGES: [(usize, usize); 12] = [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
+    ];
+    for (start, end) in EDGES {
+        append_wireframe_line(
+            transform * corners[start].extend(1.0),
+            transform * corners[end].extend(1.0),
+            vertices,
+        );
+    }
+}
+
+fn append_wireframe_sphere(radius: f32, transform: Mat4, vertices: &mut Vec<Vertex>) {
+    const SEGMENTS: usize = 24;
+    for axis in 0..3 {
+        for segment in 0..SEGMENTS {
+            let angle = segment as f32 * std::f32::consts::TAU / SEGMENTS as f32;
+            let next_angle = (segment + 1) as f32 * std::f32::consts::TAU / SEGMENTS as f32;
+            let point = |angle: f32| match axis {
+                0 => Vec3::new(0.0, angle.cos() * radius, angle.sin() * radius),
+                1 => Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius),
+                _ => Vec3::new(angle.cos() * radius, angle.sin() * radius, 0.0),
+            };
+            append_wireframe_line(
+                transform * point(angle).extend(1.0),
+                transform * point(next_angle).extend(1.0),
+                vertices,
+            );
+        }
+    }
+}
+
+fn append_wireframe_cylinder(
+    radius: f32,
+    height: f32,
+    transform: Mat4,
+    vertices: &mut Vec<Vertex>,
+) {
+    const SEGMENTS: usize = 24;
+    let half_height = height * 0.5;
+    for segment in 0..SEGMENTS {
+        let angle = segment as f32 * std::f32::consts::TAU / SEGMENTS as f32;
+        let next_angle = (segment + 1) as f32 * std::f32::consts::TAU / SEGMENTS as f32;
+        let ring_point =
+            |angle: f32, z: f32| Vec3::new(angle.cos() * radius, angle.sin() * radius, z);
+        append_wireframe_line(
+            transform * ring_point(angle, -half_height).extend(1.0),
+            transform * ring_point(next_angle, -half_height).extend(1.0),
+            vertices,
+        );
+        append_wireframe_line(
+            transform * ring_point(angle, half_height).extend(1.0),
+            transform * ring_point(next_angle, half_height).extend(1.0),
+            vertices,
+        );
+    }
+    for angle in [
+        0.0,
+        std::f32::consts::FRAC_PI_2,
+        std::f32::consts::PI,
+        std::f32::consts::FRAC_PI_2 * 3.0,
+    ] {
+        append_wireframe_line(
+            transform
+                * Vec3::new(angle.cos() * radius, angle.sin() * radius, -half_height).extend(1.0),
+            transform
+                * Vec3::new(angle.cos() * radius, angle.sin() * radius, half_height).extend(1.0),
+            vertices,
+        );
+    }
+}
+
+fn append_wireframe_line(start: glam::Vec4, end: glam::Vec4, vertices: &mut Vec<Vertex>) {
+    vertices.push(Vertex {
+        position: start.truncate().to_array(),
+        normal: [0.0, 0.0, 1.0],
+    });
+    vertices.push(Vertex {
+        position: end.truncate().to_array(),
+        normal: [0.0, 0.0, 1.0],
+    });
+}
+
 fn load_gltf_meshes(
     path: &str,
     scale: [f32; 3],
@@ -1422,5 +1713,35 @@ mod tests {
         assert_eq!(merged[0].vertices.len(), 6);
         assert_eq!(merged[0].indices, vec![0, 1, 2, 3, 4, 5]);
         assert_eq!(merged[1].vertices.len(), 3);
+    }
+
+    #[test]
+    fn collider_wireframe_shapes_emit_line_list_geometry() {
+        let mut vertices = Vec::new();
+        append_wireframe_shape(
+            &ColliderWireframeShape::Compound {
+                children: vec![
+                    pge_core::ColliderWireframeChild {
+                        transform: Transform::default(),
+                        shape: ColliderWireframeShape::Box {
+                            size: [1.0, 2.0, 3.0],
+                        },
+                    },
+                    pge_core::ColliderWireframeChild {
+                        transform: Transform::translated([2.0, 0.0, 0.0]),
+                        shape: ColliderWireframeShape::Cylinder {
+                            radius: 0.5,
+                            height: 1.0,
+                        },
+                    },
+                ],
+            },
+            Mat4::IDENTITY,
+            &mut vertices,
+        );
+
+        // Box: 12 lines. Cylinder: 24 bottom + 24 top + 4 side lines.
+        assert_eq!(vertices.len(), (12 + 24 + 24 + 4) * 2);
+        assert!(vertices.iter().all(|vertex| vertex.position.iter().all(|value| value.is_finite())));
     }
 }
