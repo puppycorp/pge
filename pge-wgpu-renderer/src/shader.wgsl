@@ -42,3 +42,31 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let lit = ambient + diffuse * 0.65;
     return vec4<f32>(object.color.rgb * lit, object.color.a);
 }
+
+struct WireframeVertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) color: vec4<f32>,
+};
+
+struct WireframeVertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@vertex
+fn vs_wireframe(input: WireframeVertexInput) -> WireframeVertexOutput {
+    var out: WireframeVertexOutput;
+    out.clip_position = camera.view_proj * vec4<f32>(input.position, 1.0);
+    out.color = input.color;
+    return out;
+}
+
+@fragment
+fn fs_wireframe(input: WireframeVertexOutput) -> @location(0) vec4<f32> {
+    // Wireframe vertices used the mesh shader's fixed +Z normal before this
+    // path was batched. Keep that lighting response so batching changes draw
+    // cost, not the diagnostic's established appearance.
+    let l = normalize(camera.light_dir.xyz);
+    let lit = 0.35 + max(dot(vec3<f32>(0.0, 0.0, 1.0), -l), 0.0) * 0.65;
+    return vec4<f32>(input.color.rgb * lit, input.color.a);
+}
