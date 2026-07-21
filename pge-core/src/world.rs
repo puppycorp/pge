@@ -155,7 +155,10 @@ impl ColliderWireframe {
         Self {
             id: id.into(),
             category: category.into(),
-            color: [1.0, 0.0, 1.0, 1.0],
+            // Yellow is the generic PGE collider diagnostic colour. Products
+            // that need a semantic colour (for example RobotDreams reviewed
+            // robot-link envelopes) assign it explicitly.
+            color: [1.0, 0.72, 0.16, 1.0],
             transform,
             shape,
         }
@@ -465,7 +468,9 @@ impl WorldState {
             wireframes.push(ColliderWireframe {
                 id: format!("pge.scene-collider:{}", node.entity.0),
                 category: "sceneCollider".to_string(),
-                color: [1.0, 0.0, 1.0, 1.0],
+                // Native `Node::collider` diagnostics belong to PGE's
+                // generic scene layer, not to a robot's link envelope.
+                color: [1.0, 0.72, 0.16, 1.0],
                 transform: self.node_world_transform(node_id),
                 shape: collider_wireframe_shape(collider),
             });
@@ -623,8 +628,10 @@ mod tests {
         assert_eq!(wireframes.len(), 2);
         assert_eq!(wireframes[0].id, "pge.scene-collider:floor");
         assert_eq!(wireframes[0].category, "sceneCollider");
+        assert_eq!(wireframes[0].color, [1.0, 0.72, 0.16, 1.0]);
         assert_eq!(wireframes[1].id, "robot-link:shoulder");
         assert_eq!(wireframes[1].category, "robotLink");
+        assert_eq!(wireframes[1].color, [1.0, 0.72, 0.16, 1.0]);
         assert!(matches!(
             wireframes[1].shape,
             ColliderWireframeShape::Compound { .. }

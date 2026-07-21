@@ -58,6 +58,10 @@ world.push_collider_wireframe(ColliderWireframe::new(
 `ColliderWireframe` carries a stable ID, category, RGBA colour, world pose,
 and a box, sphere, cylinder, mesh-bounds, or recursively compound shape. The
 renderer obtains the complete list with `WorldState::collider_wireframes()`.
+PGE-native `Node::collider` wireframes and newly constructed generic backend
+entries use yellow by default. A product may set an explicit semantic colour;
+for example, RobotDreams reserves magenta for its reviewed robot-link
+envelopes.
 Products can update the supplied entries with their current backend poses each
 frame. The overlay is not a `Node`, `Mesh`, or `PhysicsBody`; it is excluded
 from physics stepping and camera-fitting by construction.
