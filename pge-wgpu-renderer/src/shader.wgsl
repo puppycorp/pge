@@ -45,8 +45,16 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
 struct WireframeVertexInput {
     @location(0) position: vec3<f32>,
-    @location(1) color: vec4<f32>,
+    @location(1) wireframe_index: u32,
 };
+
+struct WireframePose {
+    model: mat4x4<f32>,
+    color: vec4<f32>,
+};
+
+@group(1) @binding(0)
+var<storage, read> wireframe_poses: array<WireframePose>;
 
 struct WireframeVertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -56,8 +64,9 @@ struct WireframeVertexOutput {
 @vertex
 fn vs_wireframe(input: WireframeVertexInput) -> WireframeVertexOutput {
     var out: WireframeVertexOutput;
-    out.clip_position = camera.view_proj * vec4<f32>(input.position, 1.0);
-    out.color = input.color;
+    let pose = wireframe_poses[input.wireframe_index];
+    out.clip_position = camera.view_proj * pose.model * vec4<f32>(input.position, 1.0);
+    out.color = pose.color;
     return out;
 }
 

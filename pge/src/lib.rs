@@ -2,8 +2,8 @@ pub use pge_app as app;
 pub use pge_app::*;
 pub use pge_core as world;
 pub use pge_core::{
-    ColliderDebugOverlay, ColliderWireframe, ColliderWireframeChild, ColliderWireframeShape,
-    EntityId, EntityMetadata, WorldState,
+    ColliderDebugOverlay, ColliderWireframe, ColliderWireframeChild, ColliderWireframePose,
+    ColliderWireframeShape, EntityId, EntityMetadata, WorldState,
 };
 pub use pge_physics as shared_physics;
 pub use pge_physics::{PhysicsStep, PhysicsSystem as SharedPhysicsSystem};

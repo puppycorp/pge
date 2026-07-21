@@ -66,6 +66,24 @@ world.collider_debug.include_native_node_colliders = false;
 `ColliderWireframe` carries a stable ID, category, RGBA colour, world pose,
 and a box, sphere, cylinder, mesh-bounds, or recursively compound shape. The
 renderer obtains the complete list with `WorldState::collider_wireframes()`.
+For moving articulated physics, publish the shape layout once and update only
+the compact pose frame each tick:
+
+```rust
+use pge_core::ColliderWireframePose;
+
+world.set_collider_wireframe_pose_frame(vec![ColliderWireframePose::new(
+    "robot-link:shoulder",
+    current_shoulder_pose,
+    [1.0, 0.25, 0.77, 1.0],
+)]);
+```
+
+Increment `ColliderWireframe::shape_layout_revision` (or use
+`with_shape_layout_revision`) when replacing the shape for an existing stable
+ID. The WGPU renderer retains local line topology until this layout changes,
+then uploads only transforms and colours on ordinary frames. Existing callers
+that replace complete `ColliderWireframe` records every frame remain supported.
 Cylinder heights run along local Y, matching PGE physics and Rapier's cylinder
 convention.
 PGE-native `Node::collider` wireframes and newly constructed generic backend

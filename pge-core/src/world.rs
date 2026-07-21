@@ -139,8 +139,14 @@ pub struct ColliderWireframeChild {
 /// colour is linear RGBA and belongs to the diagnostic, not its source body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColliderWireframe {
+    /// Stable identity of this collider layout. The renderer uses this to keep
+    /// its local line topology resident while only its pose changes.
     pub id: String,
     pub category: String,
+    /// Bump this when replacing `shape` for an existing `id`. Renderers also
+    /// compare the shape itself as a defensive fallback for legacy callers.
+    #[serde(default)]
+    pub shape_layout_revision: u64,
     pub color: [f32; 4],
     pub transform: Transform,
     pub shape: ColliderWireframeShape,
@@ -156,12 +162,41 @@ impl ColliderWireframe {
         Self {
             id: id.into(),
             category: category.into(),
+            shape_layout_revision: 0,
             // Yellow is the generic PGE collider diagnostic colour. Products
             // that need a semantic colour (for example RobotDreams reviewed
             // robot-link envelopes) assign it explicitly.
             color: [1.0, 0.72, 0.16, 1.0],
             transform,
             shape,
+        }
+    }
+
+    /// Marks a changed shape layout without changing this diagnostic's stable
+    /// identity. This lets renderers retain geometry for ordinary pose frames.
+    pub fn with_shape_layout_revision(mut self, revision: u64) -> Self {
+        self.shape_layout_revision = revision;
+        self
+    }
+}
+
+/// The compact, per-frame portion of a collider diagnostic.
+///
+/// Backends can publish their wireframe shapes once, then replace only this
+/// pose frame as physics advances. `id` must name an existing wireframe layout.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColliderWireframePose {
+    pub id: String,
+    pub color: [f32; 4],
+    pub transform: Transform,
+}
+
+impl ColliderWireframePose {
+    pub fn new(id: impl Into<String>, transform: Transform, color: [f32; 4]) -> Self {
+        Self {
+            id: id.into(),
+            color,
+            transform,
         }
     }
 }
@@ -183,6 +218,11 @@ pub struct ColliderDebugOverlay {
     #[serde(default = "default_include_native_node_colliders")]
     pub include_native_node_colliders: bool,
     pub wireframes: Vec<ColliderWireframe>,
+    /// Optional backend-owned pose overrides for `wireframes`. Keeping this
+    /// separate from the layouts lets an articulated simulation upload only
+    /// transforms and colours each frame.
+    #[serde(default)]
+    pub pose_frame: Vec<ColliderWireframePose>,
 }
 
 impl Default for ColliderDebugOverlay {
@@ -191,6 +231,7 @@ impl Default for ColliderDebugOverlay {
             enabled: false,
             include_native_node_colliders: true,
             wireframes: Vec::new(),
+            pose_frame: Vec::new(),
         }
     }
 }
@@ -483,6 +524,18 @@ impl WorldState {
         }
 
         let mut wireframes = self.collider_debug.wireframes.clone();
+        let pose_by_id = self
+            .collider_debug
+            .pose_frame
+            .iter()
+            .map(|pose| (pose.id.as_str(), pose))
+            .collect::<std::collections::HashMap<_, _>>();
+        for wireframe in &mut wireframes {
+            if let Some(pose) = pose_by_id.get(wireframe.id.as_str()) {
+                wireframe.transform = pose.transform;
+                wireframe.color = pose.color;
+            }
+        }
         if self.collider_debug.include_native_node_colliders {
             for (node_id, node) in self.nodes.iter() {
                 let Some(collider) = &node.collider else {
@@ -494,6 +547,7 @@ impl WorldState {
                     // Native `Node::collider` diagnostics belong to PGE's
                     // generic scene layer, not to a robot's link envelope.
                     color: [1.0, 0.72, 0.16, 1.0],
+                    shape_layout_revision: 0,
                     transform: self.node_world_transform(node_id),
                     shape: collider_wireframe_shape(collider),
                 });
@@ -507,6 +561,13 @@ impl WorldState {
     /// transform every simulation frame for backend-owned dynamic colliders.
     pub fn push_collider_wireframe(&mut self, wireframe: ColliderWireframe) {
         self.collider_debug.wireframes.push(wireframe);
+    }
+
+    /// Replaces backend-owned collider poses for one render frame. Entries
+    /// without a matching layout are ignored, which keeps this operation safe
+    /// during layout changes and preserves native-node diagnostics.
+    pub fn set_collider_wireframe_pose_frame(&mut self, pose_frame: Vec<ColliderWireframePose>) {
+        self.collider_debug.pose_frame = pose_frame;
     }
 
     fn node_world_transform(&self, node_id: ArenaId<Node>) -> Transform {
@@ -686,6 +747,41 @@ mod tests {
 
         assert_eq!(wireframes.len(), 1);
         assert_eq!(wireframes[0].id, "physics:dynamic-bottle");
+    }
+
+    #[test]
+    fn collider_pose_frame_updates_a_stable_layout_without_republishing_shape() {
+        let mut world = WorldState::new();
+        world.collider_debug.enabled = true;
+        world.collider_debug.include_native_node_colliders = false;
+        world.push_collider_wireframe(
+            ColliderWireframe::new(
+                "robot-link:shoulder",
+                "robotLink",
+                Transform::default(),
+                ColliderWireframeShape::Box {
+                    size: [0.1, 0.2, 0.3],
+                },
+            )
+            .with_shape_layout_revision(4),
+        );
+        world.set_collider_wireframe_pose_frame(vec![ColliderWireframePose::new(
+            "robot-link:shoulder",
+            Transform::translated([1.0, 2.0, 3.0]),
+            [0.2, 0.3, 0.4, 1.0],
+        )]);
+
+        let wireframes = world.collider_wireframes();
+        assert_eq!(wireframes.len(), 1);
+        assert_eq!(wireframes[0].shape_layout_revision, 4);
+        assert_eq!(wireframes[0].transform.translation, [1.0, 2.0, 3.0]);
+        assert_eq!(wireframes[0].color, [0.2, 0.3, 0.4, 1.0]);
+        assert!(matches!(
+            wireframes[0].shape,
+            ColliderWireframeShape::Box {
+                size: [0.1, 0.2, 0.3]
+            }
+        ));
     }
 
     #[test]
