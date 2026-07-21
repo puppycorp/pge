@@ -171,11 +171,31 @@ impl ColliderWireframe {
 /// `Node::collider` field (for example reviewed robot-link profiles). These
 /// entries remain intentionally outside `nodes`, `meshes`, and `PhysicsBody`,
 /// so enabling the overlay cannot affect stepping or camera fitting.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ColliderDebugOverlay {
     pub enabled: bool,
+    /// Whether to append wireframes derived from native `Node::collider`
+    /// fields. This remains enabled by default for generic PGE scenes. A
+    /// physics-backed product can disable it when it supplies its own
+    /// authoritative live collider wireframes.
+    #[serde(default = "default_include_native_node_colliders")]
+    pub include_native_node_colliders: bool,
     pub wireframes: Vec<ColliderWireframe>,
+}
+
+impl Default for ColliderDebugOverlay {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            include_native_node_colliders: true,
+            wireframes: Vec::new(),
+        }
+    }
+}
+
+fn default_include_native_node_colliders() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -451,8 +471,9 @@ impl WorldState {
 
     /// Returns the complete renderer-facing collider overlay for this world.
     ///
-    /// Native PGE scene colliders are derived every call so their current node
-    /// poses remain accurate. `collider_debug.wireframes` supplies additional
+    /// Native PGE scene colliders are derived every call when
+    /// `include_native_node_colliders` is enabled, so their current node poses
+    /// remain accurate. `collider_debug.wireframes` supplies additional
     /// colliders owned by importers or an external physics backend. No entry
     /// returned here is a world node or a physics shape.
     pub fn collider_wireframes(&self) -> Vec<ColliderWireframe> {
@@ -461,19 +482,21 @@ impl WorldState {
         }
 
         let mut wireframes = self.collider_debug.wireframes.clone();
-        for (node_id, node) in self.nodes.iter() {
-            let Some(collider) = &node.collider else {
-                continue;
-            };
-            wireframes.push(ColliderWireframe {
-                id: format!("pge.scene-collider:{}", node.entity.0),
-                category: "sceneCollider".to_string(),
-                // Native `Node::collider` diagnostics belong to PGE's
-                // generic scene layer, not to a robot's link envelope.
-                color: [1.0, 0.72, 0.16, 1.0],
-                transform: self.node_world_transform(node_id),
-                shape: collider_wireframe_shape(collider),
-            });
+        if self.collider_debug.include_native_node_colliders {
+            for (node_id, node) in self.nodes.iter() {
+                let Some(collider) = &node.collider else {
+                    continue;
+                };
+                wireframes.push(ColliderWireframe {
+                    id: format!("pge.scene-collider:{}", node.entity.0),
+                    category: "sceneCollider".to_string(),
+                    // Native `Node::collider` diagnostics belong to PGE's
+                    // generic scene layer, not to a robot's link envelope.
+                    color: [1.0, 0.72, 0.16, 1.0],
+                    transform: self.node_world_transform(node_id),
+                    shape: collider_wireframe_shape(collider),
+                });
+            }
         }
         wireframes.sort_by(|left, right| left.id.cmp(&right.id));
         wireframes
@@ -636,6 +659,42 @@ mod tests {
             wireframes[1].shape,
             ColliderWireframeShape::Compound { .. }
         ));
+    }
+
+    #[test]
+    fn collider_wireframes_can_exclude_native_nodes_for_live_backend_debugging() {
+        let mut world = WorldState::new();
+        world.collider_debug.enabled = true;
+        world.collider_debug.include_native_node_colliders = false;
+        world.push_collider_wireframe(ColliderWireframe::new(
+            "physics:dynamic-bottle",
+            "livePhysics",
+            Transform::translated([0.0, 0.0, 0.2]),
+            ColliderWireframeShape::Cylinder {
+                radius: 0.03,
+                height: 0.18,
+            },
+        ));
+        let mut node = Node::new("render-bottle");
+        node.collider = Some(Collider::MeshBounds {
+            size: [0.08, 0.08, 0.20],
+        });
+        world.nodes.insert(node);
+
+        let wireframes = world.collider_wireframes();
+
+        assert_eq!(wireframes.len(), 1);
+        assert_eq!(wireframes[0].id, "physics:dynamic-bottle");
+    }
+
+    #[test]
+    fn collider_debug_overlay_legacy_serialization_keeps_native_nodes_enabled() {
+        let overlay: ColliderDebugOverlay =
+            serde_json::from_str(r#"{"enabled":true,"wireframes":[]}"#)
+                .expect("legacy collider-debug overlay should deserialize");
+
+        assert!(overlay.enabled);
+        assert!(overlay.include_native_node_colliders);
     }
 
     #[test]

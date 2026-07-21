@@ -55,6 +55,14 @@ world.push_collider_wireframe(ColliderWireframe::new(
 ));
 ```
 
+By default the overlay also draws every native `Node::collider`. A caller
+that provides authoritative live physics wireframes can prevent duplicate
+diagnostics from render-scene colliders:
+
+```rust
+world.collider_debug.include_native_node_colliders = false;
+```
+
 `ColliderWireframe` carries a stable ID, category, RGBA colour, world pose,
 and a box, sphere, cylinder, mesh-bounds, or recursively compound shape. The
 renderer obtains the complete list with `WorldState::collider_wireframes()`.
