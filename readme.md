@@ -66,6 +66,8 @@ world.collider_debug.include_native_node_colliders = false;
 `ColliderWireframe` carries a stable ID, category, RGBA colour, world pose,
 and a box, sphere, cylinder, mesh-bounds, or recursively compound shape. The
 renderer obtains the complete list with `WorldState::collider_wireframes()`.
+Cylinder heights run along local Y, matching PGE physics and Rapier's cylinder
+convention.
 PGE-native `Node::collider` wireframes and newly constructed generic backend
 entries use yellow by default. A product may set an explicit semantic colour;
 for example, RobotDreams reserves magenta for its reviewed robot-link

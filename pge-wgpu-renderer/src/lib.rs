@@ -1530,7 +1530,7 @@ fn append_wireframe_cylinder(
         let angle = segment as f32 * std::f32::consts::TAU / SEGMENTS as f32;
         let next_angle = (segment + 1) as f32 * std::f32::consts::TAU / SEGMENTS as f32;
         let ring_point =
-            |angle: f32, z: f32| Vec3::new(angle.cos() * radius, angle.sin() * radius, z);
+            |angle: f32, y: f32| Vec3::new(angle.cos() * radius, y, angle.sin() * radius);
         append_wireframe_line(
             transform * ring_point(angle, -half_height).extend(1.0),
             transform * ring_point(next_angle, -half_height).extend(1.0),
@@ -1550,9 +1550,9 @@ fn append_wireframe_cylinder(
     ] {
         append_wireframe_line(
             transform
-                * Vec3::new(angle.cos() * radius, angle.sin() * radius, -half_height).extend(1.0),
+                * Vec3::new(angle.cos() * radius, -half_height, angle.sin() * radius).extend(1.0),
             transform
-                * Vec3::new(angle.cos() * radius, angle.sin() * radius, half_height).extend(1.0),
+                * Vec3::new(angle.cos() * radius, half_height, angle.sin() * radius).extend(1.0),
             vertices,
         );
     }
@@ -1742,6 +1742,32 @@ mod tests {
 
         // Box: 12 lines. Cylinder: 24 bottom + 24 top + 4 side lines.
         assert_eq!(vertices.len(), (12 + 24 + 24 + 4) * 2);
-        assert!(vertices.iter().all(|vertex| vertex.position.iter().all(|value| value.is_finite())));
+        assert!(vertices
+            .iter()
+            .all(|vertex| vertex.position.iter().all(|value| value.is_finite())));
+    }
+
+    #[test]
+    fn collider_wireframe_cylinder_height_uses_local_y_axis() {
+        let mut vertices = Vec::new();
+        append_wireframe_cylinder(2.0, 10.0, Mat4::IDENTITY, &mut vertices);
+
+        let min = vertices
+            .iter()
+            .fold(Vec3::splat(f32::INFINITY), |min, vertex| {
+                min.min(Vec3::from_array(vertex.position))
+            });
+        let max = vertices
+            .iter()
+            .fold(Vec3::splat(f32::NEG_INFINITY), |max, vertex| {
+                max.max(Vec3::from_array(vertex.position))
+            });
+
+        assert!((min.x + 2.0).abs() < 0.0001);
+        assert!((max.x - 2.0).abs() < 0.0001);
+        assert!((min.y + 5.0).abs() < 0.0001);
+        assert!((max.y - 5.0).abs() < 0.0001);
+        assert!((min.z + 2.0).abs() < 0.0001);
+        assert!((max.z - 2.0).abs() < 0.0001);
     }
 }

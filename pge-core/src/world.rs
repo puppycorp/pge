@@ -112,6 +112,7 @@ pub enum ColliderWireframeShape {
     Sphere {
         radius: f32,
     },
+    /// A cylinder centered at the local origin whose height runs along local Y.
     Cylinder {
         radius: f32,
         height: f32,
