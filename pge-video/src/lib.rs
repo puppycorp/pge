@@ -186,9 +186,11 @@ impl StreamingRgbaMp4Encoder {
         let output = output.into();
         if let Some(parent) = output.parent() {
             if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent).map_err(|source| VideoError::CreateOutputDirectory {
-                    path: parent.to_path_buf(),
-                    source,
+                std::fs::create_dir_all(parent).map_err(|source| {
+                    VideoError::CreateOutputDirectory {
+                        path: parent.to_path_buf(),
+                        source,
+                    }
                 })?;
             }
         }
@@ -247,7 +249,11 @@ impl StreamingRgbaMp4Encoder {
             return Err(VideoError::StreamWrite {
                 source: std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    format!("expected {} RGBA bytes, got {}", self.frame_bytes, bytes.len()),
+                    format!(
+                        "expected {} RGBA bytes, got {}",
+                        self.frame_bytes,
+                        bytes.len()
+                    ),
                 ),
             });
         }
@@ -264,7 +270,10 @@ impl StreamingRgbaMp4Encoder {
 
     pub fn finish(mut self) -> Result<VideoRecordOutput, VideoError> {
         drop(self.stdin.take());
-        let status = self.child.wait().map_err(|source| VideoError::Launch { source })?;
+        let status = self
+            .child
+            .wait()
+            .map_err(|source| VideoError::Launch { source })?;
         if !status.success() {
             return Err(VideoError::EncoderFailed { status });
         }

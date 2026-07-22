@@ -2287,6 +2287,7 @@ dependencies = [
  "log",
  "lyon",
  "pge-core",
+ "pge-physics",
  "pge-renderer",
  "pge-wgpu-renderer",
  "pollster",
@@ -2321,7 +2322,7 @@ dependencies = [
 name = "pge-physics"
 version = "0.1.0"
 dependencies = [
- "pge-core",
+ "parry3d",
  "rapier3d",
 ]
 

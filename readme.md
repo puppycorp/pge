@@ -1,6 +1,68 @@
 # PGE
 
-Game engine
+PuppyCorp's reusable world, rendering, application, video, and physics engine.
+
+## Physics ownership
+
+PGE owns the complete generic physical world and keeps the selected solver
+backend private. Consumers create persistent `pge_physics::PhysicsWorld`
+instances and address bodies, colliders, joints, and sensors with stable PGE
+IDs. The contract covers fixed stepping, forces and impulses, body-mode and
+kinematic commands, queries, ordered contact/sensor events, atomic snapshots,
+checkpoints, and backend-neutral diagnostics.
+
+The dependency direction is:
+
+```text
+product configuration -> simulation semantics -> PGE physics -> private solver
+```
+
+Robot and product meaning remains outside PGE. PGE does not interpret URDF,
+model virtual devices, decide grasp or attachment policy, run task triggers, or
+contain PuppyBot calibration and scenarios. RobotDreams translates those
+robotics concepts into PGE physics commands and observations.
+
+The persistent API is currently experimental (`PHYSICS_API_VERSION == 0`)
+while its first stable-version review is completed. The solver dependency is a
+private `pge-physics` implementation detail: PGE has no public backend reexport,
+handle API, rebuild-per-step compatibility system, or second app solver.
+
+Physics uses metres, kilograms, seconds, Newtons, and radians. Poses use a
+right-handed coordinate system and quaternions in `[x, y, z, w]` order;
+cylinders and capsules extend along local Y. `PhysicsConfig::fixed_dt_sec` is
+the public step duration and each step is divided into its configured number of
+equal substeps.
+
+`StepInput` is the deterministic mutation boundary. Commands are applied
+atomically in vector order immediately before a fixed step; a failed command
+restores the complete pre-batch checkpoint and no time advances. Bounded
+kinematic targets are then sampled before every substep in stable body-ID
+order. Snapshots sort bodies, colliders, joints, contacts, and sensor pairs by
+their stable public IDs. Same-build checkpoint continuation is tested for exact
+PGE snapshot/event equality; cross-platform bitwise floating-point identity is
+not promised and consumers should compare continuous values with declared
+tolerances.
+
+Every post-step snapshot also carries the authoritative collider debug
+geometry and contact inspection state. Contact pairs contain deterministically
+ordered manifolds and points with world witnesses, oriented normals,
+penetration/distance, relative velocity, and finite solver impulses when the
+backend provides them. Events include step, substep, and sequence indices.
+Diagnostics report body activity, sleeping and CCD counts, pair/manifold/point
+counts, resources, and total step time; backend phase timings are optional
+rather than fabricated when the backend does not expose them.
+
+Generic joints may use either independent impulse constraints or private
+multibody articulation mechanics; both retain stable `JointId` ownership and
+participate in snapshots, checkpoints, diagnostics, and lifecycle removal.
+Joint friction is an explicit bounded Coulomb policy, not a damping alias:
+`set_joint_friction` accepts a maximum resisting force in N for prismatic
+joints or torque in N*m for revolute/spherical joints. Before each substep PGE
+applies a sign-opposing impulse capped by both `maximum_effort * dt` and the
+impulse needed to reach zero relative speed, so it cannot accelerate a joint
+through rest. Break thresholds compare deterministic PGE-observed constraint
+impulse/effort magnitudes after each substep, remove exceeded joints before the
+next substep, and report stable-ID `JointBreakEvent`s in joint-ID order.
 
 ## ENVS
 

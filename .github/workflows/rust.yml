@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  PGE_PHYSICS_STRICT_CUTOVER_API: "1"
 
 jobs:
   build_and_test:

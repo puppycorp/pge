@@ -6,7 +6,6 @@ pub use pge_core::{
     ColliderWireframeShape, EntityId, EntityMetadata, WorldState,
 };
 pub use pge_physics as shared_physics;
-pub use pge_physics::{PhysicsStep, PhysicsSystem as SharedPhysicsSystem};
 pub use pge_renderer as render;
 pub use pge_renderer::{
     FrameBuffer, FrameKind, OffscreenRenderer, PerformanceCounter, PerformanceTiming,

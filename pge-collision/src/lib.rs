@@ -859,9 +859,9 @@ pub struct CollisionCandidates {
     pub convex_hull: ConvexHullCandidate,
 }
 
-/// A narrow, reviewable JSON profile that can be consumed by RobotDreams' vehicle
-/// collider loader. It intentionally contains only primitive types supported by that
-/// loader and never contains generated mesh or convex-hull data.
+/// A narrow, reviewable, engine-neutral collision profile. It intentionally
+/// contains only portable primitive types and never contains generated mesh or
+/// backend-specific convex-hull data.
 ///
 /// Its JSON form is exactly:
 ///
@@ -913,7 +913,7 @@ pub struct ReviewedCompoundProfileSelection {
 }
 
 impl ReviewedCollisionProfile {
-    /// Serializes the exact interchange JSON accepted by RobotDreams.
+    /// Serializes the generic reviewed-collision interchange format.
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
@@ -1098,9 +1098,9 @@ impl CollisionCandidates {
         })
     }
 
-    /// Exports one deterministic, conservative choice as a RobotDreams-compatible
-    /// profile. The caller remains responsible for visually reviewing and approving
-    /// the returned artifact before using it at simulation startup.
+    /// Exports one deterministic, conservative, engine-neutral profile. The caller
+    /// remains responsible for visually reviewing and approving the returned artifact
+    /// before using it at simulation startup.
     pub fn export_reviewed_profile(
         &self,
         config: ReviewedProfileExportConfig,
@@ -2136,41 +2136,6 @@ mod tests {
     }
 
     #[test]
-    fn puppybot_esp32_asset_generates_with_full_coverage_and_bounded_evidence() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../PuppyBot/models/puppybot/final2/meshes/esp32_Wroom_30pins_C_Type_73.gltf");
-        let asset = load_gltf_triangle_mesh(&path).expect("load PuppyBot ESP32 asset");
-        let candidates =
-            generate_collision_candidates(&asset.mesh, CollisionGenerationConfig::default())
-                .expect("generate ESP32 candidates");
-        let compound = &candidates.compounds[0];
-        let usable_triangle_count = usable_triangles(&asset.mesh).len();
-
-        assert_eq!(
-            compound.quality.source_triangle_count,
-            usable_triangle_count
-        );
-        assert_eq!(
-            compound.quality.covered_triangle_count,
-            compound.quality.source_triangle_count
-        );
-        assert!(matches!(
-            compound.quality.generation_path,
-            CompoundGenerationPath::BoundsFallback {
-                reason: CompoundGenerationFallbackReason::PartitionLimit { .. }
-                    | CompoundGenerationFallbackReason::TriangleLimit { .. },
-            }
-        ));
-        let selection = candidates
-            .select_compound_profile(4)
-            .expect("select conservative ESP32 compound");
-        assert_eq!(
-            selection.evidence.compound_generation_path,
-            compound.quality.generation_path
-        );
-    }
-
-    #[test]
     fn loads_a_real_gltf_fixture_with_parent_node_transforms_and_provenance() {
         let fixture = write_gltf_fixture();
         let loaded = load_gltf_triangle_mesh(&fixture.path).expect("load fixture");
@@ -2435,7 +2400,7 @@ mod tests {
     }
 
     #[test]
-    fn exports_robotdreams_reviewed_profile_with_deterministic_budget_fallback() {
+    fn exports_generic_reviewed_profile_with_deterministic_budget_fallback() {
         let candidates = CollisionCandidates {
             bounds: BoxCandidate {
                 center: [0.0, 0.0, 0.05],
@@ -2524,7 +2489,7 @@ mod tests {
     }
 
     #[test]
-    fn exports_cardinal_cylinders_with_robotdreams_rpy_rotation() {
+    fn exports_cardinal_cylinders_with_portable_rpy_rotation() {
         let candidates =
             generate_collision_candidates(&tetrahedron(), CollisionGenerationConfig::default())
                 .expect("valid tetrahedron");

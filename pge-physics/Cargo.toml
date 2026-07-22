@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-pge-core = { path = "../pge-core" }
+parry3d = "0.18"
 rapier3d = { version = "0.23", default-features = false, features = ["dim3", "f32"] }
